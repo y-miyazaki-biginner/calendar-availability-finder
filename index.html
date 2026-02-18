@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Calendar Availability Finder</title>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div class="app-container">
+
+    <!-- 認証前画面 -->
+    <div id="auth-section" class="section">
+      <div class="logo">
+        <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+          <rect width="48" height="48" rx="12" fill="#4285F4"/>
+          <path d="M14 18h20v16H14z" fill="white" opacity="0.9"/>
+          <path d="M14 16h20v4H14z" fill="#EA4335"/>
+          <circle cx="21" cy="28" r="2" fill="#4285F4"/>
+          <circle cx="28" cy="28" r="2" fill="#34A853"/>
+          <circle cx="21" cy="34" r="2" fill="#FBBC05"/>
+        </svg>
+      </div>
+      <h1>Calendar Availability Finder</h1>
+      <p class="subtitle">Googleカレンダーと連携して空き時間を検索</p>
+      <button id="auth-btn" class="btn btn-primary btn-large">
+        <svg width="18" height="18" viewBox="0 0 18 18" style="margin-right: 8px;">
+          <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/>
+          <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
+          <path d="M3.964 10.707A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.707V4.961H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.039l3.007-2.332z" fill="#FBBC05"/>
+          <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.961L3.964 7.293C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
+        </svg>
+        Googleアカウントでログイン
+      </button>
+    </div>
+
+    <!-- メイン画面 -->
+    <div id="main-section" class="section hidden">
+      <header>
+        <h2>空き時間検索</h2>
+        <button id="settings-toggle" class="btn btn-icon" title="設定">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="currentColor">
+            <path d="M10 13a3 3 0 100-6 3 3 0 000 6z"/>
+            <path fill-rule="evenodd" d="M9.99 1.003A1 1 0 0111 2v.382a7.03 7.03 0 011.86.773l.27-.27a1 1 0 011.414 1.414l-.27.27A7.03 7.03 0 0115.046 6.5H15.5a1 1 0 110 2h-.454a7.03 7.03 0 01-.773 1.86l.27.27a1 1 0 01-1.414 1.414l-.27-.27a7.03 7.03 0 01-1.86.773V13a1 1 0 11-2 0v-.454a7.03 7.03 0 01-1.86-.773l-.27.27a1 1 0 01-1.414-1.414l.27-.27A7.03 7.03 0 014.954 8.5H4.5a1 1 0 010-2h.454a7.03 7.03 0 01.773-1.86l-.27-.27A1 1 0 016.87 2.956l.27.27A7.03 7.03 0 019 2.382V2a1 1 0 01.99-.997z"/>
+          </svg>
+        </button>
+      </header>
+
+      <!-- 設定パネル -->
+      <div id="settings-panel" class="settings-panel hidden">
+        <h3>検索設定</h3>
+        <div class="setting-group">
+          <label>検索範囲</label>
+          <select id="search-range">
+            <option value="7">1週間先まで</option>
+            <option value="14" selected>2週間先まで</option>
+            <option value="21">3週間先まで</option>
+            <option value="30">1ヶ月先まで</option>
+          </select>
+        </div>
+        <div class="setting-group">
+          <label>対象曜日</label>
+          <div class="day-checkboxes">
+            <label class="day-check"><input type="checkbox" value="1" checked> 月</label>
+            <label class="day-check"><input type="checkbox" value="2" checked> 火</label>
+            <label class="day-check"><input type="checkbox" value="3" checked> 水</label>
+            <label class="day-check"><input type="checkbox" value="4" checked> 木</label>
+            <label class="day-check"><input type="checkbox" value="5" checked> 金</label>
+            <label class="day-check"><input type="checkbox" value="6"> 土</label>
+            <label class="day-check"><input type="checkbox" value="0"> 日</label>
+          </div>
+        </div>
+        <div class="setting-group">
+          <label>検索時間帯</label>
+          <div class="time-range">
+            <input type="time" id="time-start" value="11:00">
+            <span>〜</span>
+            <input type="time" id="time-end" value="18:00">
+          </div>
+        </div>
+        <div class="setting-group">
+          <label>ミーティング時間（分）</label>
+          <select id="meeting-duration">
+            <option value="15">15分</option>
+            <option value="30" selected>30分</option>
+            <option value="45">45分</option>
+            <option value="60">60分（1時間）</option>
+            <option value="90">90分（1.5時間）</option>
+            <option value="120">120分（2時間）</option>
+          </select>
+        </div>
+        <div class="setting-group">
+          <label>除外キーワード（予定名に含まれる場合スキップ）</label>
+          <input type="text" id="exclude-keywords" class="text-input" placeholder="画面操作, 作業, 移動" value="画面操作">
+          <p class="setting-hint">カンマ区切りで複数指定可</p>
+        </div>
+        <button id="save-settings" class="btn btn-secondary">設定を保存</button>
+      </div>
+
+      <!-- メールアドレス入力 -->
+      <div class="input-section">
+        <label>参加者のメールアドレス</label>
+        <div class="email-input-row">
+          <input type="email" id="email-input" placeholder="example@gmail.com" autocomplete="email">
+          <button id="add-email-btn" class="btn btn-primary">追加</button>
+        </div>
+        <div id="email-tags" class="email-tags"></div>
+      </div>
+
+      <!-- 検索ボタン -->
+      <button id="search-btn" class="btn btn-primary btn-large" disabled>
+        空き時間を検索
+      </button>
+
+      <!-- ローディング -->
+      <div id="loading" class="loading hidden">
+        <div class="spinner"></div>
+        <p>カレンダーを確認中...</p>
+      </div>
+
+      <!-- 結果表示 -->
+      <div id="results" class="results hidden">
+        <!-- 競合なしセクション -->
+        <div id="free-section">
+          <h3 class="results-heading results-heading-free">競合なしの候補</h3>
+          <div id="free-slots" class="slots-list"></div>
+        </div>
+
+        <!-- 競合少セクション -->
+        <div id="partial-section" class="hidden">
+          <h3 class="results-heading results-heading-partial">競合ありの候補（競合が少ない順）</h3>
+          <div id="partial-slots" class="slots-list"></div>
+        </div>
+
+        <!-- 競合する予定 -->
+        <div id="conflicts-section" class="conflicts-section hidden">
+          <h3>検索時間帯で競合する予定</h3>
+          <div id="conflicts-list" class="conflicts-list"></div>
+        </div>
+      </div>
+
+      <!-- フッター -->
+      <div class="footer">
+        <button id="logout-btn" class="btn btn-text">ログアウト</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Google Identity Services (OAuth2 for Web) -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="app.js"></script>
+</body>
+</html>
