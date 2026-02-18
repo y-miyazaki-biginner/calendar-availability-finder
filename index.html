@@ -133,6 +133,23 @@
           <div id="partial-slots" class="slots-list"></div>
         </div>
 
+        <!-- 予定登録パネル -->
+        <div id="register-panel" class="register-panel hidden">
+          <h3 class="register-heading">選択した日程をGoogleカレンダーに登録</h3>
+          <div class="register-input-group">
+            <label for="event-title">予定の名前</label>
+            <input type="text" id="event-title" class="text-input" placeholder="例: 定例ミーティング">
+          </div>
+          <div class="register-summary" id="register-summary"></div>
+          <button id="register-btn" class="btn btn-success btn-large" disabled>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
+              <path d="M12 5v14M5 12h14" stroke-linecap="round"/>
+            </svg>
+            選択した日程をカレンダーに登録
+          </button>
+          <div id="register-status" class="register-status hidden"></div>
+        </div>
+
         <!-- 競合する予定 -->
         <div id="conflicts-section" class="conflicts-section hidden">
           <h3>検索時間帯で競合する予定</h3>

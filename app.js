@@ -6,7 +6,8 @@
 // =====================================================
 const CONFIG = {
   CLIENT_ID: 'YOUR_CLIENT_ID.apps.googleusercontent.com',
-  SCOPES: 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.freebusy',
+  // calendar.events スコープで読み書き両方可能
+  SCOPES: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.freebusy',
 };
 
 class CalendarAvailabilityFinder {
@@ -22,6 +23,9 @@ class CalendarAvailabilityFinder {
       activeDays: [1, 2, 3, 4, 5],
       excludeKeywords: ['画面操作'],
     };
+    // 検索結果スロットを保持（チェックボックス選択用）
+    this.lastFreeSlots = [];
+    this.lastPartialSlots = [];
 
     this.init();
   }
@@ -37,7 +41,6 @@ class CalendarAvailabilityFinder {
   // Google Identity Services (Web OAuth2)
   // ============================================================
   initGoogleAuth() {
-    // GIS ライブラリがロードされるまで待機
     const waitForGis = () => {
       if (typeof google !== 'undefined' && google.accounts) {
         this.tokenClient = google.accounts.oauth2.initTokenClient({
@@ -87,6 +90,12 @@ class CalendarAvailabilityFinder {
     this.partialSlots = document.getElementById('partial-slots');
     this.conflictsSection = document.getElementById('conflicts-section');
     this.conflictsList = document.getElementById('conflicts-list');
+    // 予定登録パネル
+    this.registerPanel = document.getElementById('register-panel');
+    this.eventTitle = document.getElementById('event-title');
+    this.registerBtn = document.getElementById('register-btn');
+    this.registerSummary = document.getElementById('register-summary');
+    this.registerStatus = document.getElementById('register-status');
   }
 
   bindEvents() {
@@ -99,6 +108,8 @@ class CalendarAvailabilityFinder {
       if (e.key === 'Enter') this.addEmail();
     });
     this.searchBtn.addEventListener('click', () => this.searchAvailability());
+    this.registerBtn.addEventListener('click', () => this.registerEvents());
+    this.eventTitle.addEventListener('input', () => this.updateRegisterButton());
   }
 
   // ============================================================
@@ -148,14 +159,12 @@ class CalendarAvailabilityFinder {
     this.settings.endTime = this.timeEnd.value;
     this.settings.meetingDuration = parseInt(this.meetingDuration.value);
 
-    // 除外キーワード
     const rawKeywords = this.excludeKeywords.value;
     this.settings.excludeKeywords = rawKeywords
       .split(/[,、，]/)
       .map((k) => k.trim())
       .filter(Boolean);
 
-    // 対象曜日
     const dayCheckboxes = document.querySelectorAll('.day-check input');
     this.settings.activeDays = [];
     dayCheckboxes.forEach((cb) => {
@@ -259,7 +268,6 @@ class CalendarAvailabilityFinder {
     const eventStartMin = eventStart.getHours() * 60 + eventStart.getMinutes();
     const eventEndMin = eventEnd.getHours() * 60 + eventEnd.getMinutes();
 
-    // 検索時間帯と重なるかチェック（日付は別で見るので時刻部分のみ）
     return eventStartMin < searchEndMin && eventEndMin > searchStartMin;
   }
 
@@ -300,6 +308,25 @@ class CalendarAvailabilityFinder {
     return res.json();
   }
 
+  async apiInsertEvent(eventBody) {
+    const res = await fetch(
+      'https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=none',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${this.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(eventBody),
+      }
+    );
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error?.message || `API error: ${res.status}`);
+    }
+    return res.json();
+  }
+
   // ============================================================
   // Main Search
   // ============================================================
@@ -310,6 +337,8 @@ class CalendarAvailabilityFinder {
     this.results.classList.add('hidden');
     this.conflictsSection.classList.add('hidden');
     this.partialSection.classList.add('hidden');
+    this.registerPanel.classList.add('hidden');
+    this.registerStatus.classList.add('hidden');
 
     try {
       const now = new Date();
@@ -321,27 +350,26 @@ class CalendarAvailabilityFinder {
       timeMax.setDate(timeMax.getDate() + this.settings.searchRange);
       timeMax.setHours(23, 59, 59, 0);
 
-      // --- 全参加者のイベント詳細を取得 ---
       const allEvents = await this.getAllEvents(timeMin, timeMax);
 
-      // --- ①除外キーワードフィルタ適用 ---
       const filteredEvents = allEvents.filter(
         (ev) => !this.shouldExcludeEvent(ev.title)
       );
 
-      // --- busyPeriods を filteredEvents から構築 ---
       const busyPeriods = filteredEvents.map((ev) => ({
         email: ev.email,
         start: ev.start,
         end: ev.end,
       }));
 
-      // --- ③ 競合なし + 競合少スロットを算出 ---
       const { freeSlots, partialSlots } = this.findAllSlots(
         timeMin, timeMax, busyPeriods
       );
 
-      // --- ② 検索時間帯内の競合のみ抽出 ---
+      // 結果を保持
+      this.lastFreeSlots = freeSlots;
+      this.lastPartialSlots = partialSlots;
+
       const conflictsInRange = filteredEvents.filter((ev) =>
         this.isWithinSearchTimeRange(ev.start, ev.end) &&
         this.settings.activeDays.includes(ev.start.getDay())
@@ -376,7 +404,6 @@ class CalendarAvailabilityFinder {
           }
         }
       } catch {
-        // FreeBusy API へフォールバック
         try {
           const fbData = await this.apiQueryFreeBusy({
             timeMin: timeMin.toISOString(),
@@ -450,12 +477,10 @@ class CalendarAvailabilityFinder {
       }
 
       if (slotStart > new Date()) {
-        // このスロットと競合する予定を集める
         const conflicting = busyPeriods.filter(
           (busy) => slotStart < busy.end && slotEnd > busy.start
         );
 
-        // 競合している人数（ユニーク）
         const conflictingPeople = new Set(conflicting.map((c) => c.email));
         const conflictCount = conflictingPeople.size;
 
@@ -467,7 +492,6 @@ class CalendarAvailabilityFinder {
             conflictingEmails: [],
           });
         } else if (conflictCount < totalPeople) {
-          // 全員がNGではない = 一部の人だけ競合
           partialSlots.push({
             start: new Date(slotStart),
             end: new Date(slotEnd),
@@ -476,13 +500,11 @@ class CalendarAvailabilityFinder {
             conflictingEvents: conflicting,
           });
         }
-        // conflictCount === totalPeople → 全員NG → 表示しない
       }
 
       current.setMinutes(current.getMinutes() + slotStep);
     }
 
-    // 競合少ない順にソート
     partialSlots.sort((a, b) => {
       if (a.conflictCount !== b.conflictCount) return a.conflictCount - b.conflictCount;
       return a.start - b.start;
@@ -492,7 +514,7 @@ class CalendarAvailabilityFinder {
   }
 
   // ============================================================
-  // Rendering
+  // Rendering (with checkboxes)
   // ============================================================
   renderResults(freeSlots, partialSlots, conflictsInRange) {
     this.results.classList.remove('hidden');
@@ -506,19 +528,25 @@ class CalendarAvailabilityFinder {
         </div>`;
     } else {
       this.freeSlots.innerHTML = this.renderSlotCards(freeSlots, 'free');
-      this.attachCopyButtons(this.freeSlots);
+      this.attachSlotInteractions(this.freeSlots);
     }
 
     // --- 競合少スロット ---
     if (partialSlots.length > 0) {
       this.partialSection.classList.remove('hidden');
       this.partialSlots.innerHTML = this.renderSlotCards(partialSlots, 'partial');
-      this.attachCopyButtons(this.partialSlots);
+      this.attachSlotInteractions(this.partialSlots);
     } else {
       this.partialSection.classList.add('hidden');
     }
 
-    // --- ② 検索時間帯内の競合のみ表示 ---
+    // --- 登録パネル表示 ---
+    if (freeSlots.length > 0 || partialSlots.length > 0) {
+      this.registerPanel.classList.remove('hidden');
+      this.updateRegisterButton();
+    }
+
+    // --- 競合表示 ---
     if (conflictsInRange.length > 0) {
       this.conflictsSection.classList.remove('hidden');
 
@@ -548,12 +576,16 @@ class CalendarAvailabilityFinder {
   renderSlotCards(slots, type) {
     const grouped = this.groupSlotsByDate(slots);
     let html = '';
+    let slotIdx = 0;
 
     for (const [dateStr, daySlots] of Object.entries(grouped)) {
       html += `<div class="slot-date">${dateStr}</div>`;
       for (const slot of daySlots) {
         const timeStr = this.formatTimeRange(slot.start, slot.end);
         const copyText = `${dateStr} ${timeStr}`;
+        const slotId = `${type}-${slotIdx}`;
+        const dataStart = slot.start.toISOString();
+        const dataEnd = slot.end.toISOString();
 
         let badge = '';
         if (type === 'partial') {
@@ -564,29 +596,153 @@ class CalendarAvailabilityFinder {
         html += `
           <div class="slot-card slot-card-${type}">
             <div class="slot-header">
-              <div>
-                <span class="slot-time">${timeStr}</span>
-                ${badge}
-              </div>
+              <label class="slot-check-label">
+                <input type="checkbox" class="slot-checkbox" data-slot-id="${slotId}" data-start="${dataStart}" data-end="${dataEnd}">
+                <div>
+                  <span class="slot-time">${timeStr}</span>
+                  ${badge}
+                </div>
+              </label>
               <button class="btn btn-copy" data-copy="${this.escapeHtml(copyText)}">コピー</button>
             </div>
           </div>`;
+        slotIdx++;
       }
     }
 
     return html;
   }
 
-  attachCopyButtons(container) {
+  attachSlotInteractions(container) {
+    // Copy buttons
     container.querySelectorAll('.btn-copy').forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         navigator.clipboard.writeText(btn.dataset.copy);
         btn.textContent = 'コピー済み';
         setTimeout(() => { btn.textContent = 'コピー'; }, 1500);
       });
     });
+
+    // Checkbox changes
+    container.querySelectorAll('.slot-checkbox').forEach((cb) => {
+      cb.addEventListener('change', () => this.onSlotCheckChanged());
+    });
   }
 
+  // ============================================================
+  // チェックボックス選択 → 登録パネル更新
+  // ============================================================
+  getCheckedSlots() {
+    const checked = [];
+    document.querySelectorAll('.slot-checkbox:checked').forEach((cb) => {
+      checked.push({
+        start: cb.dataset.start,
+        end: cb.dataset.end,
+      });
+    });
+    return checked;
+  }
+
+  onSlotCheckChanged() {
+    const checked = this.getCheckedSlots();
+    const count = checked.length;
+
+    if (count > 0) {
+      const lines = checked.map((s) => {
+        const start = new Date(s.start);
+        const end = new Date(s.end);
+        return `${this.formatDate(start)} ${this.formatTimeRange(start, end)}`;
+      });
+      this.registerSummary.innerHTML = `
+        <strong>${count}件選択中:</strong>
+        <ul>${lines.map((l) => `<li>${l}</li>`).join('')}</ul>`;
+    } else {
+      this.registerSummary.innerHTML = '';
+    }
+
+    this.updateRegisterButton();
+  }
+
+  updateRegisterButton() {
+    const checked = this.getCheckedSlots();
+    const title = this.eventTitle.value.trim();
+    this.registerBtn.disabled = checked.length === 0 || title.length === 0;
+  }
+
+  // ============================================================
+  // Google Calendar 予定登録
+  // ============================================================
+  async registerEvents() {
+    const checked = this.getCheckedSlots();
+    const title = this.eventTitle.value.trim();
+    if (checked.length === 0 || !title) return;
+
+    this.registerBtn.disabled = true;
+    this.registerBtn.textContent = '登録中...';
+    this.registerStatus.classList.add('hidden');
+
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const attendees = this.emails.map((email) => ({ email }));
+
+    const results = [];
+
+    for (const slot of checked) {
+      const eventBody = {
+        summary: title,
+        start: { dateTime: slot.start, timeZone: tz },
+        end: { dateTime: slot.end, timeZone: tz },
+        attendees,
+      };
+
+      try {
+        await this.apiInsertEvent(eventBody);
+        const s = new Date(slot.start);
+        const e = new Date(slot.end);
+        results.push({ success: true, label: `${this.formatDate(s)} ${this.formatTimeRange(s, e)}` });
+      } catch (err) {
+        const s = new Date(slot.start);
+        const e = new Date(slot.end);
+        results.push({ success: false, label: `${this.formatDate(s)} ${this.formatTimeRange(s, e)}`, error: err.message });
+      }
+    }
+
+    // 結果表示
+    const successCount = results.filter((r) => r.success).length;
+    const failCount = results.filter((r) => !r.success).length;
+
+    let statusHtml = '';
+    if (successCount > 0) {
+      statusHtml += `<div class="register-success">✅ ${successCount}件の予定を登録しました！</div>`;
+    }
+    if (failCount > 0) {
+      statusHtml += `<div class="register-error">❌ ${failCount}件の登録に失敗しました:</div>`;
+      for (const r of results.filter((r) => !r.success)) {
+        statusHtml += `<div class="register-error-detail">${r.label}: ${this.escapeHtml(r.error)}</div>`;
+      }
+    }
+
+    this.registerStatus.innerHTML = statusHtml;
+    this.registerStatus.classList.remove('hidden');
+
+    // チェックボックスをリセット
+    document.querySelectorAll('.slot-checkbox:checked').forEach((cb) => {
+      cb.checked = false;
+    });
+    this.registerSummary.innerHTML = '';
+
+    this.registerBtn.innerHTML = `
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
+        <path d="M12 5v14M5 12h14" stroke-linecap="round"/>
+      </svg>
+      選択した日程をカレンダーに登録`;
+    this.updateRegisterButton();
+  }
+
+  // ============================================================
+  // Error / Loading
+  // ============================================================
   showError(message) {
     this.results.classList.remove('hidden');
     this.freeSlots.innerHTML = `<div class="error-message">${this.escapeHtml(message)}</div>`;

@@ -408,6 +408,155 @@ header h2 {
 ::-webkit-scrollbar-thumb { background: #dadce0; border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: #bdc1c6; }
 
+/* Register Panel */
+.register-panel {
+  background: white;
+  border-radius: 12px;
+  padding: 20px;
+  margin-top: 20px;
+  border: 1px solid #c8e6c9;
+  box-shadow: 0 2px 8px rgba(52, 168, 83, 0.08);
+}
+
+.register-heading {
+  font-size: 15px;
+  font-weight: 600;
+  color: #1b7e4b;
+  margin-bottom: 16px;
+}
+
+.register-input-group {
+  margin-bottom: 14px;
+}
+.register-input-group label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: #5f6368;
+  margin-bottom: 6px;
+}
+.register-input-group .text-input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  font-size: 14px;
+  color: #202124;
+  background: white;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.2s;
+}
+.register-input-group .text-input:focus {
+  border-color: #34a853;
+  box-shadow: 0 0 0 2px rgba(52, 168, 83, 0.2);
+}
+
+.register-summary {
+  font-size: 13px;
+  color: #202124;
+  margin-bottom: 14px;
+  line-height: 1.6;
+}
+.register-summary strong {
+  color: #1b7e4b;
+}
+.register-summary ul {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0 0;
+}
+.register-summary li {
+  padding: 4px 0 4px 16px;
+  position: relative;
+  font-size: 13px;
+  color: #3c4043;
+}
+.register-summary li::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  color: #34a853;
+  font-weight: bold;
+}
+
+.btn-success {
+  background: #34a853;
+  color: white;
+  padding: 10px 20px;
+}
+.btn-success:hover {
+  background: #2d8e47;
+  box-shadow: 0 2px 8px rgba(52, 168, 83, 0.3);
+}
+.btn-success:disabled {
+  background: #a8dab5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.register-status {
+  margin-top: 14px;
+}
+
+.register-success {
+  background: #e6f4ea;
+  border: 1px solid #ceead6;
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: #1b7e4b;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.register-error {
+  background: #fce8e6;
+  border: 1px solid #f5c6c0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  color: #d93025;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.register-error-detail {
+  background: #fce8e6;
+  border-left: 3px solid #d93025;
+  padding: 8px 12px;
+  margin-top: 6px;
+  font-size: 12px;
+  color: #5f6368;
+  border-radius: 0 4px 4px 0;
+}
+
+/* Slot Checkboxes */
+.slot-check-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+}
+
+.slot-checkbox {
+  width: 18px;
+  height: 18px;
+  accent-color: #34a853;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.slot-card:has(.slot-checkbox:checked) {
+  background: #f0faf3;
+  border-color: #34a853;
+}
+.slot-card-partial:has(.slot-checkbox:checked) {
+  background: #fef9ee;
+  border-color: #f9ab00;
+}
+
 /* Error */
 .error-message {
   background: #fce8e6;

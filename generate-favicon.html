@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><title>Favicon Generator</title></head>
+<body style="font-family: sans-serif; padding: 40px; background: #f5f5f5;">
+  <h1>Favicon Generator</h1>
+  <p>下のボタンをクリックして favicon.png をダウンロードし、プロジェクトフォルダに保存してください。</p>
+  <canvas id="c" width="128" height="128" style="border: 1px solid #ccc; border-radius: 12px; margin: 20px 0;"></canvas>
+  <br>
+  <button onclick="download()" style="padding: 10px 24px; background: #4285F4; color: white; border: none; border-radius: 8px; font-size: 15px; cursor: pointer;">
+    favicon.png をダウンロード
+  </button>
+  <script>
+    const c = document.getElementById('c');
+    const ctx = c.getContext('2d');
+    const s = 128;
+
+    // Background
+    ctx.beginPath();
+    ctx.roundRect(0, 0, s, s, s * 0.18);
+    ctx.fillStyle = '#4285F4';
+    ctx.fill();
+
+    // Calendar body
+    const p = s * 0.15;
+    const w = s - p * 2;
+    const h = s - p * 2;
+    ctx.fillStyle = 'white';
+    ctx.beginPath();
+    ctx.roundRect(p, p + h * 0.12, w, h * 0.88, s * 0.05);
+    ctx.fill();
+
+    // Calendar header
+    ctx.fillStyle = '#EA4335';
+    ctx.beginPath();
+    ctx.roundRect(p, p, w, h * 0.22, [s * 0.05, s * 0.05, 0, 0]);
+    ctx.fill();
+
+    // Dots
+    const dotR = s * 0.06;
+    ctx.fillStyle = '#34A853';
+    ctx.beginPath(); ctx.arc(s * 0.38, s * 0.55, dotR, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#4285F4';
+    ctx.beginPath(); ctx.arc(s * 0.62, s * 0.55, dotR, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#FBBC05';
+    ctx.beginPath(); ctx.arc(s * 0.38, s * 0.73, dotR, 0, Math.PI * 2); ctx.fill();
+
+    // Checkmark
+    ctx.strokeStyle = '#34A853';
+    ctx.lineWidth = s * 0.06;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(s * 0.52, s * 0.73);
+    ctx.lineTo(s * 0.58, s * 0.79);
+    ctx.lineTo(s * 0.72, s * 0.65);
+    ctx.stroke();
+
+    function download() {
+      const link = document.createElement('a');
+      link.download = 'favicon.png';
+      link.href = c.toDataURL('image/png');
+      link.click();
+    }
+  </script>
+</body>
+</html>
