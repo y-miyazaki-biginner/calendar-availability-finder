@@ -352,9 +352,16 @@ class CalendarAvailabilityFinder {
 
       const allEvents = await this.getAllEvents(timeMin, timeMax);
 
+      // デバッグ: 取得した全イベントをコンソールに出力
+      console.log(`[日程調整ツール] 取得イベント数: ${allEvents.length}`);
+      for (const ev of allEvents) {
+        console.log(`  ${ev.email}: 「${ev.title}」 ${ev.start.toLocaleString()} - ${ev.end.toLocaleString()}`);
+      }
+
       const filteredEvents = allEvents.filter(
         (ev) => !this.shouldExcludeEvent(ev.title)
       );
+      console.log(`[日程調整ツール] 除外後イベント数: ${filteredEvents.length}（除外キーワード: ${(this.settings.excludeKeywords || []).join(', ')}）`);
 
       const busyPeriods = filteredEvents.map((ev) => ({
         email: ev.email,
@@ -387,23 +394,53 @@ class CalendarAvailabilityFinder {
     const allEvents = [];
 
     for (const email of this.emails) {
+      let gotEvents = false;
+
+      // まず Events API を試す
       try {
         const data = await this.apiGetEvents(
           email, timeMin.toISOString(), timeMax.toISOString()
         );
         if (data.items) {
           for (const event of data.items) {
+            // キャンセル済み・辞退済みはスキップ
+            if (event.status === 'cancelled') continue;
+            // transparency: 'transparent' は「予定あり」扱いにしない予定（空き時間）
+            if (event.transparency === 'transparent') continue;
+
             if (event.start?.dateTime) {
+              // 時刻指定のイベント
               allEvents.push({
                 email,
                 title: event.summary || '(タイトルなし)',
                 start: new Date(event.start.dateTime),
                 end: new Date(event.end.dateTime),
               });
+            } else if (event.start?.date) {
+              // 終日イベント → 検索時間帯でブロックとして扱う
+              const eventDate = new Date(event.start.date);
+              const [sh, sm] = this.settings.startTime.split(':').map(Number);
+              const [eh, em] = this.settings.endTime.split(':').map(Number);
+              const blockStart = new Date(eventDate);
+              blockStart.setHours(sh, sm, 0, 0);
+              const blockEnd = new Date(eventDate);
+              blockEnd.setHours(eh, em, 0, 0);
+              allEvents.push({
+                email,
+                title: event.summary || '(終日予定)',
+                start: blockStart,
+                end: blockEnd,
+              });
             }
           }
+          gotEvents = true;
         }
-      } catch {
+      } catch (e) {
+        console.warn(`Events API failed for ${email}:`, e.message);
+      }
+
+      // Events API が失敗した場合は FreeBusy にフォールバック
+      if (!gotEvents) {
         try {
           const fbData = await this.apiQueryFreeBusy({
             timeMin: timeMin.toISOString(),
@@ -422,7 +459,9 @@ class CalendarAvailabilityFinder {
               });
             }
           }
-        } catch { /* skip */ }
+        } catch (e) {
+          console.warn(`FreeBusy API also failed for ${email}:`, e.message);
+        }
       }
     }
 
@@ -438,7 +477,8 @@ class CalendarAvailabilityFinder {
     const [startHour, startMin] = this.settings.startTime.split(':').map(Number);
     const [endHour, endMin] = this.settings.endTime.split(':').map(Number);
     const duration = this.settings.meetingDuration;
-    const slotStep = 30;
+    // スロットのステップ = ミーティング時間と同じにする（重複スロットを防止）
+    const slotStep = duration;
     const totalPeople = this.emails.length;
 
     const current = new Date(timeMin);
