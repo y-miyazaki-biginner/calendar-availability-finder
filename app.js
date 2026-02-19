@@ -5,7 +5,7 @@
 // ★ デプロイ時にここを書き換える
 // =====================================================
 const CONFIG = {
-  CLIENT_ID: 'YOUR_CLIENT_ID.apps.googleusercontent.com',
+  CLIENT_ID: '416943777269-ie7jg6j4tr53j1lqfplvcnhde0rajuls.apps.googleusercontent.com',
   // calendar.events スコープで読み書き両方可能
   SCOPES: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.freebusy',
 };
