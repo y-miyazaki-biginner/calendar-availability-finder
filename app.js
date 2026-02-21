@@ -430,8 +430,11 @@ class CalendarAvailabilityFinder {
     }
 
     // ============================================================
-    // Events API は補助的に使う（予定名を取得して競合詳細に表示するため）
-    // FreeBusy の busy 期間にマッチするイベント名を埋める
+    // Events API で補完:
+    //   1. FreeBusy のbusy期間にタイトルを付ける
+    //   2. FreeBusy が拾わなかった予定（未回答 needsAction 等）も
+    //      カレンダーに載っていれば busy 扱いとして追加する
+    //      ※ 辞退（declined）だけ除外する
     // ============================================================
     for (const email of this.emails) {
       try {
@@ -443,31 +446,55 @@ class CalendarAvailabilityFinder {
             if (event.status === 'cancelled') continue;
             if (event.transparency === 'transparent') continue;
 
+            // この人の出欠ステータスを確認 → declined だけスキップ
+            const attendee = event.attendees?.find(
+              (a) => a.email?.toLowerCase() === email.toLowerCase() || a.self
+            );
+            if (attendee && attendee.responseStatus === 'declined') continue;
+
             let evStart, evEnd, evTitle;
             if (event.start?.dateTime) {
               evStart = new Date(event.start.dateTime);
               evEnd = new Date(event.end.dateTime);
               evTitle = event.summary || '(タイトルなし)';
             } else if (event.start?.date) {
-              continue; // 終日イベントは FreeBusy がカバー済み
+              // 終日イベント → 検索時間帯をブロック
+              const eventDate = new Date(event.start.date);
+              const [sh, sm] = this.settings.startTime.split(':').map(Number);
+              const [eh, em] = this.settings.endTime.split(':').map(Number);
+              evStart = new Date(eventDate);
+              evStart.setHours(sh, sm, 0, 0);
+              evEnd = new Date(eventDate);
+              evEnd.setHours(eh, em, 0, 0);
+              evTitle = event.summary || '(終日予定)';
             } else {
               continue;
             }
 
-            // FreeBusy のbusy期間で同じ時間帯のエントリにタイトルを付ける
+            // FreeBusy のbusy期間と重なるか確認
+            let matched = false;
             for (const ev of allEvents) {
-              if (ev.email === email && ev.source === 'freebusy' && !ev.title) {
-                // busy期間がこのイベントを含んでいるか
-                if (ev.start <= evStart && ev.end >= evEnd) {
-                  ev.title = evTitle;
-                  break;
-                }
-                // またはイベントがbusy期間と重なっているか
+              if (ev.email === email && ev.source === 'freebusy') {
                 if (evStart < ev.end && evEnd > ev.start) {
-                  ev.title = evTitle;
+                  // 重なっている → タイトルを付ける
+                  if (!ev.title) ev.title = evTitle;
+                  matched = true;
                   break;
                 }
               }
+            }
+
+            // FreeBusy にない予定 = 未回答(needsAction)や仮承諾(tentative)で
+            // FreeBusy がbusy扱いしなかったもの → busy として追加
+            if (!matched) {
+              allEvents.push({
+                email,
+                title: evTitle,
+                start: evStart,
+                end: evEnd,
+                source: 'events-api',
+              });
+              console.log(`[日程調整ツール] FreeBusyに無い予定を追加: ${email} 「${evTitle}」 ${evStart.toLocaleString()} - ${evEnd.toLocaleString()}`);
             }
           }
         }
