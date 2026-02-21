@@ -392,76 +392,95 @@ class CalendarAvailabilityFinder {
 
   async getAllEvents(timeMin, timeMax) {
     const allEvents = [];
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
+    // ============================================================
+    // ★ FreeBusy API をメインに使う
+    //   → 自分が参加していない相手の予定も含め、
+    //     相手のカレンダー上でブロックされている全時間を取得できる
+    // ============================================================
+    try {
+      const fbData = await this.apiQueryFreeBusy({
+        timeMin: timeMin.toISOString(),
+        timeMax: timeMax.toISOString(),
+        timeZone: tz,
+        items: this.emails.map((email) => ({ id: email })),
+      });
+
+      for (const email of this.emails) {
+        const cal = fbData.calendars?.[email];
+        if (cal?.errors) {
+          console.warn(`FreeBusy error for ${email}:`, cal.errors);
+        }
+        if (cal?.busy) {
+          for (const b of cal.busy) {
+            allEvents.push({
+              email,
+              title: '', // FreeBusy ではタイトル取得不可
+              start: new Date(b.start),
+              end: new Date(b.end),
+              source: 'freebusy',
+            });
+          }
+        }
+      }
+      console.log(`[日程調整ツール] FreeBusy で ${allEvents.length} 件のbusy期間を取得`);
+    } catch (e) {
+      console.error('FreeBusy API failed:', e.message);
+    }
+
+    // ============================================================
+    // Events API は補助的に使う（予定名を取得して競合詳細に表示するため）
+    // FreeBusy の busy 期間にマッチするイベント名を埋める
+    // ============================================================
     for (const email of this.emails) {
-      let gotEvents = false;
-
-      // まず Events API を試す
       try {
         const data = await this.apiGetEvents(
           email, timeMin.toISOString(), timeMax.toISOString()
         );
         if (data.items) {
           for (const event of data.items) {
-            // キャンセル済み・辞退済みはスキップ
             if (event.status === 'cancelled') continue;
-            // transparency: 'transparent' は「予定あり」扱いにしない予定（空き時間）
             if (event.transparency === 'transparent') continue;
 
+            let evStart, evEnd, evTitle;
             if (event.start?.dateTime) {
-              // 時刻指定のイベント
-              allEvents.push({
-                email,
-                title: event.summary || '(タイトルなし)',
-                start: new Date(event.start.dateTime),
-                end: new Date(event.end.dateTime),
-              });
+              evStart = new Date(event.start.dateTime);
+              evEnd = new Date(event.end.dateTime);
+              evTitle = event.summary || '(タイトルなし)';
             } else if (event.start?.date) {
-              // 終日イベント → 検索時間帯でブロックとして扱う
-              const eventDate = new Date(event.start.date);
-              const [sh, sm] = this.settings.startTime.split(':').map(Number);
-              const [eh, em] = this.settings.endTime.split(':').map(Number);
-              const blockStart = new Date(eventDate);
-              blockStart.setHours(sh, sm, 0, 0);
-              const blockEnd = new Date(eventDate);
-              blockEnd.setHours(eh, em, 0, 0);
-              allEvents.push({
-                email,
-                title: event.summary || '(終日予定)',
-                start: blockStart,
-                end: blockEnd,
-              });
+              continue; // 終日イベントは FreeBusy がカバー済み
+            } else {
+              continue;
+            }
+
+            // FreeBusy のbusy期間で同じ時間帯のエントリにタイトルを付ける
+            for (const ev of allEvents) {
+              if (ev.email === email && ev.source === 'freebusy' && !ev.title) {
+                // busy期間がこのイベントを含んでいるか
+                if (ev.start <= evStart && ev.end >= evEnd) {
+                  ev.title = evTitle;
+                  break;
+                }
+                // またはイベントがbusy期間と重なっているか
+                if (evStart < ev.end && evEnd > ev.start) {
+                  ev.title = evTitle;
+                  break;
+                }
+              }
             }
           }
-          gotEvents = true;
         }
       } catch (e) {
-        console.warn(`Events API failed for ${email}:`, e.message);
+        // Events API が失敗しても問題なし（FreeBusy でbusy期間は取れている）
+        console.log(`Events API failed for ${email} (OK - using FreeBusy data): ${e.message}`);
       }
+    }
 
-      // Events API が失敗した場合は FreeBusy にフォールバック
-      if (!gotEvents) {
-        try {
-          const fbData = await this.apiQueryFreeBusy({
-            timeMin: timeMin.toISOString(),
-            timeMax: timeMax.toISOString(),
-            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-            items: [{ id: email }],
-          });
-          const cal = fbData.calendars?.[email];
-          if (cal?.busy) {
-            for (const b of cal.busy) {
-              allEvents.push({
-                email,
-                title: '(詳細不明 - FreeBusy)',
-                start: new Date(b.start),
-                end: new Date(b.end),
-              });
-            }
-          }
-        } catch (e) {
-          console.warn(`FreeBusy API also failed for ${email}:`, e.message);
-        }
+    // タイトルが取れなかったbusy期間にデフォルト名を設定
+    for (const ev of allEvents) {
+      if (!ev.title) {
+        ev.title = '(予定あり)';
       }
     }
 
