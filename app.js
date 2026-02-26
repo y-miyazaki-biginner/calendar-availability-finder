@@ -6,7 +6,6 @@
 // =====================================================
 const CONFIG = {
   CLIENT_ID: '416943777269-ie7jg6j4tr53j1lqfplvcnhde0rajuls.apps.googleusercontent.com',
-  // calendar.events スコープで読み書き両方可能
   SCOPES: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.freebusy',
 };
 
@@ -16,14 +15,16 @@ class CalendarAvailabilityFinder {
     this.tokenClient = null;
     this.emails = [];
     this.settings = {
+      rangeMode: 'relative',   // 'relative' or 'absolute'
       searchRange: 14,
+      dateStart: '',
+      dateEnd: '',
       startTime: '11:00',
       endTime: '18:00',
       meetingDuration: 30,
       activeDays: [1, 2, 3, 4, 5],
       excludeKeywords: ['画面操作'],
     };
-    // 検索結果スロットを保持（チェックボックス選択用）
     this.lastFreeSlots = [];
     this.lastPartialSlots = [];
 
@@ -34,13 +35,31 @@ class CalendarAvailabilityFinder {
     this.bindElements();
     this.bindEvents();
     this.loadSettings();
+    this.loadEmailHistory();
+    this.loadSavedGroups();
     this.initGoogleAuth();
   }
 
   // ============================================================
   // Google Identity Services (Web OAuth2)
+  // ① ログイン保持: token を sessionStorage に保存し再訪問時に復元
   // ============================================================
   initGoogleAuth() {
+    // sessionStorage から token を復元
+    const savedToken = sessionStorage.getItem('calendarToken');
+    if (savedToken) {
+      this.token = savedToken;
+      // token が有効か確認
+      this.validateToken().then((valid) => {
+        if (valid) {
+          this.showMain();
+        } else {
+          sessionStorage.removeItem('calendarToken');
+          this.token = null;
+        }
+      });
+    }
+
     const waitForGis = () => {
       if (typeof google !== 'undefined' && google.accounts) {
         this.tokenClient = google.accounts.oauth2.initTokenClient({
@@ -52,6 +71,8 @@ class CalendarAvailabilityFinder {
               return;
             }
             this.token = response.access_token;
+            // sessionStorage に保存（タブ閉じるまで有効）
+            sessionStorage.setItem('calendarToken', this.token);
             this.showMain();
           },
         });
@@ -60,6 +81,17 @@ class CalendarAvailabilityFinder {
       }
     };
     waitForGis();
+  }
+
+  async validateToken() {
+    try {
+      const res = await fetch(
+        `https://www.googleapis.com/oauth2/v1/tokeninfo?access_token=${this.token}`
+      );
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 
   // ============================================================
@@ -72,7 +104,12 @@ class CalendarAvailabilityFinder {
     this.logoutBtn = document.getElementById('logout-btn');
     this.settingsToggle = document.getElementById('settings-toggle');
     this.settingsPanel = document.getElementById('settings-panel');
+    this.rangeMode = document.getElementById('range-mode');
+    this.relativeRangeGroup = document.getElementById('relative-range-group');
+    this.absoluteRangeGroup = document.getElementById('absolute-range-group');
     this.searchRange = document.getElementById('search-range');
+    this.dateStart = document.getElementById('date-start');
+    this.dateEnd = document.getElementById('date-end');
     this.timeStart = document.getElementById('time-start');
     this.timeEnd = document.getElementById('time-end');
     this.meetingDuration = document.getElementById('meeting-duration');
@@ -90,12 +127,15 @@ class CalendarAvailabilityFinder {
     this.partialSlots = document.getElementById('partial-slots');
     this.conflictsSection = document.getElementById('conflicts-section');
     this.conflictsList = document.getElementById('conflicts-list');
-    // 予定登録パネル
     this.registerPanel = document.getElementById('register-panel');
     this.eventTitle = document.getElementById('event-title');
     this.registerBtn = document.getElementById('register-btn');
     this.registerSummary = document.getElementById('register-summary');
     this.registerStatus = document.getElementById('register-status');
+    // メールアドレス保存
+    this.savedGroupsContainer = document.getElementById('saved-groups');
+    this.saveGroupBtn = document.getElementById('save-group-btn');
+    this.emailHistoryList = document.getElementById('email-history-list');
   }
 
   bindEvents() {
@@ -110,6 +150,10 @@ class CalendarAvailabilityFinder {
     this.searchBtn.addEventListener('click', () => this.searchAvailability());
     this.registerBtn.addEventListener('click', () => this.registerEvents());
     this.eventTitle.addEventListener('input', () => this.updateRegisterButton());
+    // 範囲モード切替
+    this.rangeMode.addEventListener('change', () => this.onRangeModeChange());
+    // グループ保存
+    this.saveGroupBtn.addEventListener('click', () => this.saveCurrentGroup());
   }
 
   // ============================================================
@@ -127,6 +171,7 @@ class CalendarAvailabilityFinder {
     }
     this.token = null;
     this.emails = [];
+    sessionStorage.removeItem('calendarToken');
     this.showAuth();
   }
 
@@ -139,10 +184,11 @@ class CalendarAvailabilityFinder {
     this.authSection.classList.add('hidden');
     this.mainSection.classList.remove('hidden');
     this.applySettingsToUI();
+    this.renderSavedGroups();
   }
 
   // ============================================================
-  // Settings (localStorage for persistence)
+  // Settings (localStorage)
   // ============================================================
   loadSettings() {
     try {
@@ -154,7 +200,10 @@ class CalendarAvailabilityFinder {
   }
 
   saveSettings() {
+    this.settings.rangeMode = this.rangeMode.value;
     this.settings.searchRange = parseInt(this.searchRange.value);
+    this.settings.dateStart = this.dateStart.value;
+    this.settings.dateEnd = this.dateEnd.value;
     this.settings.startTime = this.timeStart.value;
     this.settings.endTime = this.timeEnd.value;
     this.settings.meetingDuration = parseInt(this.meetingDuration.value);
@@ -179,24 +228,57 @@ class CalendarAvailabilityFinder {
   }
 
   applySettingsToUI() {
+    this.rangeMode.value = this.settings.rangeMode || 'relative';
     this.searchRange.value = this.settings.searchRange;
     this.timeStart.value = this.settings.startTime;
     this.timeEnd.value = this.settings.endTime;
     this.meetingDuration.value = this.settings.meetingDuration;
     this.excludeKeywords.value = (this.settings.excludeKeywords || []).join(', ');
 
+    // 日付指定のデフォルト値を設定
+    if (!this.settings.dateStart) {
+      const today = new Date();
+      this.dateStart.value = this.toDateString(today);
+      const twoWeeks = new Date(today);
+      twoWeeks.setDate(twoWeeks.getDate() + 14);
+      this.dateEnd.value = this.toDateString(twoWeeks);
+    } else {
+      this.dateStart.value = this.settings.dateStart;
+      this.dateEnd.value = this.settings.dateEnd;
+    }
+
     const dayCheckboxes = document.querySelectorAll('.day-check input');
     dayCheckboxes.forEach((cb) => {
       cb.checked = this.settings.activeDays.includes(parseInt(cb.value));
     });
+
+    this.onRangeModeChange();
+  }
+
+  onRangeModeChange() {
+    const mode = this.rangeMode.value;
+    if (mode === 'relative') {
+      this.relativeRangeGroup.classList.remove('hidden');
+      this.absoluteRangeGroup.classList.add('hidden');
+    } else {
+      this.relativeRangeGroup.classList.add('hidden');
+      this.absoluteRangeGroup.classList.remove('hidden');
+    }
   }
 
   toggleSettings() {
     this.settingsPanel.classList.toggle('hidden');
   }
 
+  toDateString(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
   // ============================================================
-  // Email Management
+  // ④ Email Management (履歴保存 + グループ保存)
   // ============================================================
   addEmail() {
     const email = this.emailInput.value.trim().toLowerCase();
@@ -211,6 +293,7 @@ class CalendarAvailabilityFinder {
       return;
     }
     this.emails.push(email);
+    this.addToEmailHistory(email);
     this.renderEmailTags();
     this.emailInput.value = '';
     this.emailInput.focus();
@@ -246,8 +329,91 @@ class CalendarAvailabilityFinder {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   }
 
+  // メール履歴（datalist用）
+  loadEmailHistory() {
+    try {
+      const history = JSON.parse(localStorage.getItem('emailHistory') || '[]');
+      this.emailHistory = history;
+      this.renderEmailHistory();
+    } catch {
+      this.emailHistory = [];
+    }
+  }
+
+  addToEmailHistory(email) {
+    if (!this.emailHistory.includes(email)) {
+      this.emailHistory.push(email);
+      localStorage.setItem('emailHistory', JSON.stringify(this.emailHistory));
+      this.renderEmailHistory();
+    }
+  }
+
+  renderEmailHistory() {
+    this.emailHistoryList.innerHTML = this.emailHistory
+      .map((e) => `<option value="${this.escapeHtml(e)}">`)
+      .join('');
+  }
+
+  // グループ保存
+  loadSavedGroups() {
+    try {
+      this.savedGroups = JSON.parse(localStorage.getItem('emailGroups') || '[]');
+    } catch {
+      this.savedGroups = [];
+    }
+  }
+
+  saveCurrentGroup() {
+    if (this.emails.length === 0) return;
+    const name = prompt('グループ名を入力してください:', `グループ${this.savedGroups.length + 1}`);
+    if (!name) return;
+    this.savedGroups.push({ name, emails: [...this.emails] });
+    localStorage.setItem('emailGroups', JSON.stringify(this.savedGroups));
+    this.renderSavedGroups();
+  }
+
+  loadGroup(index) {
+    const group = this.savedGroups[index];
+    if (!group) return;
+    this.emails = [...group.emails];
+    this.renderEmailTags();
+    this.updateSearchButton();
+  }
+
+  deleteGroup(index, e) {
+    e.stopPropagation();
+    this.savedGroups.splice(index, 1);
+    localStorage.setItem('emailGroups', JSON.stringify(this.savedGroups));
+    this.renderSavedGroups();
+  }
+
+  renderSavedGroups() {
+    if (this.savedGroups.length === 0) {
+      this.savedGroupsContainer.innerHTML = '';
+      return;
+    }
+    this.savedGroupsContainer.innerHTML = this.savedGroups
+      .map((g, i) => `
+        <span class="group-tag" data-index="${i}" title="${g.emails.join(', ')}">
+          ${this.escapeHtml(g.name)} (${g.emails.length}人)
+          <span class="group-delete" data-index="${i}">&times;</span>
+        </span>`)
+      .join('');
+
+    this.savedGroupsContainer.querySelectorAll('.group-tag').forEach((tag) => {
+      tag.addEventListener('click', (e) => {
+        if (!e.target.classList.contains('group-delete')) {
+          this.loadGroup(parseInt(tag.dataset.index));
+        }
+      });
+    });
+    this.savedGroupsContainer.querySelectorAll('.group-delete').forEach((btn) => {
+      btn.addEventListener('click', (e) => this.deleteGroup(parseInt(btn.dataset.index), e));
+    });
+  }
+
   // ============================================================
-  // ① 除外キーワードフィルタ
+  // 除外キーワードフィルタ
   // ============================================================
   shouldExcludeEvent(title) {
     if (!title) return false;
@@ -257,7 +423,7 @@ class CalendarAvailabilityFinder {
   }
 
   // ============================================================
-  // ② 検索時間帯内かどうか判定
+  // 検索時間帯内かどうか判定
   // ============================================================
   isWithinSearchTimeRange(eventStart, eventEnd) {
     const [startH, startM] = this.settings.startTime.split(':').map(Number);
@@ -272,7 +438,7 @@ class CalendarAvailabilityFinder {
   }
 
   // ============================================================
-  // Google Calendar API (直接 fetch)
+  // Google Calendar API
   // ============================================================
   async apiQueryFreeBusy(params) {
     const res = await fetch('https://www.googleapis.com/calendar/v3/freeBusy', {
@@ -328,10 +494,64 @@ class CalendarAvailabilityFinder {
   }
 
   // ============================================================
-  // Main Search
+  // ② ③ Main Search（期間計算修正 + 絶対指定対応）
   // ============================================================
+  getSearchRange() {
+    const now = new Date();
+    let timeMin, timeMax;
+
+    if (this.settings.rangeMode === 'absolute') {
+      // ③ 絶対日付指定
+      const startStr = this.dateStart.value;
+      const endStr = this.dateEnd.value;
+      if (!startStr || !endStr) {
+        throw new Error('開始日と終了日を指定してください');
+      }
+      timeMin = new Date(startStr + 'T00:00:00');
+      timeMax = new Date(endStr + 'T23:59:59');
+
+      // 過去の開始日は今に補正
+      if (timeMin < now) {
+        timeMin = new Date(now);
+        timeMin.setMinutes(0, 0, 0);
+        timeMin.setHours(timeMin.getHours() + 1);
+      }
+    } else {
+      // 相対指定
+      timeMin = new Date(now);
+      timeMin.setMinutes(0, 0, 0);
+      timeMin.setHours(timeMin.getHours() + 1);
+
+      timeMax = new Date(now);
+      timeMax.setDate(timeMax.getDate() + this.settings.searchRange);
+      timeMax.setHours(23, 59, 59, 0);
+    }
+
+    console.log(`[日程調整ツール] 検索範囲: ${timeMin.toLocaleString()} 〜 ${timeMax.toLocaleString()}`);
+    return { timeMin, timeMax };
+  }
+
   async searchAvailability() {
     if (this.emails.length === 0) return;
+
+    // 検索前に設定をUIから読み取る（保存ボタン押さなくても反映）
+    this.settings.rangeMode = this.rangeMode.value;
+    this.settings.searchRange = parseInt(this.searchRange.value);
+    this.settings.startTime = this.timeStart.value;
+    this.settings.endTime = this.timeEnd.value;
+    this.settings.meetingDuration = parseInt(this.meetingDuration.value);
+
+    const rawKeywords = this.excludeKeywords.value;
+    this.settings.excludeKeywords = rawKeywords
+      .split(/[,、，]/)
+      .map((k) => k.trim())
+      .filter(Boolean);
+
+    const dayCheckboxes = document.querySelectorAll('.day-check input');
+    this.settings.activeDays = [];
+    dayCheckboxes.forEach((cb) => {
+      if (cb.checked) this.settings.activeDays.push(parseInt(cb.value));
+    });
 
     this.showLoading(true);
     this.results.classList.add('hidden');
@@ -341,18 +561,10 @@ class CalendarAvailabilityFinder {
     this.registerStatus.classList.add('hidden');
 
     try {
-      const now = new Date();
-      const timeMin = new Date(now);
-      timeMin.setMinutes(0, 0, 0);
-      timeMin.setHours(timeMin.getHours() + 1);
-
-      const timeMax = new Date(now);
-      timeMax.setDate(timeMax.getDate() + this.settings.searchRange);
-      timeMax.setHours(23, 59, 59, 0);
+      const { timeMin, timeMax } = this.getSearchRange();
 
       const allEvents = await this.getAllEvents(timeMin, timeMax);
 
-      // デバッグ: 取得した全イベントをコンソールに出力
       console.log(`[日程調整ツール] 取得イベント数: ${allEvents.length}`);
       for (const ev of allEvents) {
         console.log(`  ${ev.email}: 「${ev.title}」 ${ev.start.toLocaleString()} - ${ev.end.toLocaleString()}`);
@@ -361,7 +573,7 @@ class CalendarAvailabilityFinder {
       const filteredEvents = allEvents.filter(
         (ev) => !this.shouldExcludeEvent(ev.title)
       );
-      console.log(`[日程調整ツール] 除外後イベント数: ${filteredEvents.length}（除外キーワード: ${(this.settings.excludeKeywords || []).join(', ')}）`);
+      console.log(`[日程調整ツール] 除外後イベント数: ${filteredEvents.length}`);
 
       const busyPeriods = filteredEvents.map((ev) => ({
         email: ev.email,
@@ -373,7 +585,6 @@ class CalendarAvailabilityFinder {
         timeMin, timeMax, busyPeriods
       );
 
-      // 結果を保持
       this.lastFreeSlots = freeSlots;
       this.lastPartialSlots = partialSlots;
 
@@ -394,11 +605,7 @@ class CalendarAvailabilityFinder {
     const allEvents = [];
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-    // ============================================================
-    // ★ FreeBusy API をメインに使う
-    //   → 自分が参加していない相手の予定も含め、
-    //     相手のカレンダー上でブロックされている全時間を取得できる
-    // ============================================================
+    // FreeBusy API をメインに使う
     try {
       const fbData = await this.apiQueryFreeBusy({
         timeMin: timeMin.toISOString(),
@@ -416,7 +623,7 @@ class CalendarAvailabilityFinder {
           for (const b of cal.busy) {
             allEvents.push({
               email,
-              title: '', // FreeBusy ではタイトル取得不可
+              title: '',
               start: new Date(b.start),
               end: new Date(b.end),
               source: 'freebusy',
@@ -429,13 +636,7 @@ class CalendarAvailabilityFinder {
       console.error('FreeBusy API failed:', e.message);
     }
 
-    // ============================================================
-    // Events API で補完:
-    //   1. FreeBusy のbusy期間にタイトルを付ける
-    //   2. FreeBusy が拾わなかった予定（未回答 needsAction 等）も
-    //      カレンダーに載っていれば busy 扱いとして追加する
-    //      ※ 辞退（declined）だけ除外する
-    // ============================================================
+    // Events API で補完（タイトル取得 + 未回答予定の追加）
     for (const email of this.emails) {
       try {
         const data = await this.apiGetEvents(
@@ -446,7 +647,6 @@ class CalendarAvailabilityFinder {
             if (event.status === 'cancelled') continue;
             if (event.transparency === 'transparent') continue;
 
-            // この人の出欠ステータスを確認 → declined だけスキップ
             const attendee = event.attendees?.find(
               (a) => a.email?.toLowerCase() === email.toLowerCase() || a.self
             );
@@ -458,7 +658,6 @@ class CalendarAvailabilityFinder {
               evEnd = new Date(event.end.dateTime);
               evTitle = event.summary || '(タイトルなし)';
             } else if (event.start?.date) {
-              // 終日イベント → 検索時間帯をブロック
               const eventDate = new Date(event.start.date);
               const [sh, sm] = this.settings.startTime.split(':').map(Number);
               const [eh, em] = this.settings.endTime.split(':').map(Number);
@@ -471,12 +670,10 @@ class CalendarAvailabilityFinder {
               continue;
             }
 
-            // FreeBusy のbusy期間と重なるか確認
             let matched = false;
             for (const ev of allEvents) {
               if (ev.email === email && ev.source === 'freebusy') {
                 if (evStart < ev.end && evEnd > ev.start) {
-                  // 重なっている → タイトルを付ける
                   if (!ev.title) ev.title = evTitle;
                   matched = true;
                   break;
@@ -484,8 +681,6 @@ class CalendarAvailabilityFinder {
               }
             }
 
-            // FreeBusy にない予定 = 未回答(needsAction)や仮承諾(tentative)で
-            // FreeBusy がbusy扱いしなかったもの → busy として追加
             if (!matched) {
               allEvents.push({
                 email,
@@ -494,17 +689,14 @@ class CalendarAvailabilityFinder {
                 end: evEnd,
                 source: 'events-api',
               });
-              console.log(`[日程調整ツール] FreeBusyに無い予定を追加: ${email} 「${evTitle}」 ${evStart.toLocaleString()} - ${evEnd.toLocaleString()}`);
             }
           }
         }
       } catch (e) {
-        // Events API が失敗しても問題なし（FreeBusy でbusy期間は取れている）
         console.log(`Events API failed for ${email} (OK - using FreeBusy data): ${e.message}`);
       }
     }
 
-    // タイトルが取れなかったbusy期間にデフォルト名を設定
     for (const ev of allEvents) {
       if (!ev.title) {
         ev.title = '(予定あり)';
@@ -515,7 +707,7 @@ class CalendarAvailabilityFinder {
   }
 
   // ============================================================
-  // ③ スロット算出: 競合なし & 競合少
+  // ② スロット算出（曜日・期間バグ修正）
   // ============================================================
   findAllSlots(timeMin, timeMax, busyPeriods) {
     const freeSlots = [];
@@ -523,29 +715,54 @@ class CalendarAvailabilityFinder {
     const [startHour, startMin] = this.settings.startTime.split(':').map(Number);
     const [endHour, endMin] = this.settings.endTime.split(':').map(Number);
     const duration = this.settings.meetingDuration;
-    // スロットのステップ = ミーティング時間と同じにする（重複スロットを防止）
     const slotStep = duration;
     const totalPeople = this.emails.length;
+    const now = new Date();
 
+    // ② 開始日を正しく計算: timeMin の日付の検索開始時刻から
     const current = new Date(timeMin);
-    current.setHours(startHour, startMin, 0, 0);
+    // timeMin が今日の場合、今の時間帯の途中かもしれないので
+    // まず当日の検索開始時刻を設定
+    const dayStart = new Date(current);
+    dayStart.setHours(startHour, startMin, 0, 0);
 
-    if (current < timeMin) {
-      current.setTime(timeMin.getTime());
+    if (dayStart >= timeMin) {
+      // 検索開始時刻がまだ来ていない → その時刻から開始
       current.setHours(startHour, startMin, 0, 0);
-      if (current < timeMin) {
-        current.setDate(current.getDate() + 1);
+    } else {
+      // 検索開始時刻は過ぎている → timeMin そのままだが次のスロット区切りに合わせる
+      const minOfDay = current.getHours() * 60 + current.getMinutes();
+      const startMinOfDay = startHour * 60 + startMin;
+      if (minOfDay < startMinOfDay) {
         current.setHours(startHour, startMin, 0, 0);
+      } else {
+        // 現在時刻以降の次のスロット区切りに合わせる
+        const elapsed = minOfDay - startMinOfDay;
+        const nextSlotOffset = Math.ceil(elapsed / slotStep) * slotStep;
+        current.setHours(startHour, startMin, 0, 0);
+        current.setMinutes(current.getMinutes() + nextSlotOffset);
       }
     }
 
     const endTimeMinutes = endHour * 60 + endMin;
+    let safety = 0;
+    const maxIterations = 10000;
 
-    while (current < timeMax) {
+    while (current < timeMax && safety < maxIterations) {
+      safety++;
       const dayOfWeek = current.getDay();
 
+      // ② 曜日フィルタ: activeDays に含まれていない日はスキップ
       if (!this.settings.activeDays.includes(dayOfWeek)) {
         current.setDate(current.getDate() + 1);
+        current.setHours(startHour, startMin, 0, 0);
+        continue;
+      }
+
+      const currentMinOfDay = current.getHours() * 60 + current.getMinutes();
+
+      // 検索時間帯の開始前なら開始時刻にジャンプ
+      if (currentMinOfDay < startHour * 60 + startMin) {
         current.setHours(startHour, startMin, 0, 0);
         continue;
       }
@@ -556,13 +773,15 @@ class CalendarAvailabilityFinder {
 
       const slotEndMinutes = slotEnd.getHours() * 60 + slotEnd.getMinutes();
 
+      // 検索時間帯の終了を超えた or 日をまたいだ → 次の日へ
       if (slotEndMinutes > endTimeMinutes || slotEnd.getDate() !== slotStart.getDate()) {
         current.setDate(current.getDate() + 1);
         current.setHours(startHour, startMin, 0, 0);
         continue;
       }
 
-      if (slotStart > new Date()) {
+      // 過去のスロットはスキップ
+      if (slotStart > now) {
         const conflicting = busyPeriods.filter(
           (busy) => slotStart < busy.end && slotEnd > busy.start
         );
@@ -600,12 +819,11 @@ class CalendarAvailabilityFinder {
   }
 
   // ============================================================
-  // Rendering (with checkboxes)
+  // Rendering
   // ============================================================
   renderResults(freeSlots, partialSlots, conflictsInRange) {
     this.results.classList.remove('hidden');
 
-    // --- 競合なしスロット ---
     if (freeSlots.length === 0) {
       this.freeSlots.innerHTML = `
         <div class="no-results">
@@ -617,7 +835,6 @@ class CalendarAvailabilityFinder {
       this.attachSlotInteractions(this.freeSlots);
     }
 
-    // --- 競合少スロット ---
     if (partialSlots.length > 0) {
       this.partialSection.classList.remove('hidden');
       this.partialSlots.innerHTML = this.renderSlotCards(partialSlots, 'partial');
@@ -626,13 +843,11 @@ class CalendarAvailabilityFinder {
       this.partialSection.classList.add('hidden');
     }
 
-    // --- 登録パネル表示 ---
     if (freeSlots.length > 0 || partialSlots.length > 0) {
       this.registerPanel.classList.remove('hidden');
       this.updateRegisterButton();
     }
 
-    // --- 競合表示 ---
     if (conflictsInRange.length > 0) {
       this.conflictsSection.classList.remove('hidden');
 
@@ -700,7 +915,6 @@ class CalendarAvailabilityFinder {
   }
 
   attachSlotInteractions(container) {
-    // Copy buttons
     container.querySelectorAll('.btn-copy').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
@@ -711,14 +925,13 @@ class CalendarAvailabilityFinder {
       });
     });
 
-    // Checkbox changes
     container.querySelectorAll('.slot-checkbox').forEach((cb) => {
       cb.addEventListener('change', () => this.onSlotCheckChanged());
     });
   }
 
   // ============================================================
-  // チェックボックス選択 → 登録パネル更新
+  // チェックボックス → 登録パネル
   // ============================================================
   getCheckedSlots() {
     const checked = [];
@@ -794,7 +1007,6 @@ class CalendarAvailabilityFinder {
       }
     }
 
-    // 結果表示
     const successCount = results.filter((r) => r.success).length;
     const failCount = results.filter((r) => !r.success).length;
 
@@ -812,7 +1024,6 @@ class CalendarAvailabilityFinder {
     this.registerStatus.innerHTML = statusHtml;
     this.registerStatus.classList.remove('hidden');
 
-    // チェックボックスをリセット
     document.querySelectorAll('.slot-checkbox:checked').forEach((cb) => {
       cb.checked = false;
     });

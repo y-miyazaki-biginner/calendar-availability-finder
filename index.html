@@ -51,6 +51,13 @@
       <div id="settings-panel" class="settings-panel hidden">
         <h3>検索設定</h3>
         <div class="setting-group">
+          <label>検索範囲モード</label>
+          <select id="range-mode">
+            <option value="relative" selected>相対指定（○週間先まで）</option>
+            <option value="absolute">絶対指定（日付を指定）</option>
+          </select>
+        </div>
+        <div class="setting-group" id="relative-range-group">
           <label>検索範囲</label>
           <select id="search-range">
             <option value="7">1週間先まで</option>
@@ -58,6 +65,14 @@
             <option value="21">3週間先まで</option>
             <option value="30">1ヶ月先まで</option>
           </select>
+        </div>
+        <div class="setting-group hidden" id="absolute-range-group">
+          <label>検索期間</label>
+          <div class="date-range">
+            <input type="date" id="date-start">
+            <span>〜</span>
+            <input type="date" id="date-end">
+          </div>
         </div>
         <div class="setting-group">
           <label>対象曜日</label>
@@ -102,10 +117,16 @@
       <div class="input-section">
         <label>参加者のメールアドレス</label>
         <div class="email-input-row">
-          <input type="email" id="email-input" placeholder="example@gmail.com" autocomplete="email">
+          <input type="email" id="email-input" placeholder="example@gmail.com" autocomplete="email" list="email-history-list">
+          <datalist id="email-history-list"></datalist>
           <button id="add-email-btn" class="btn btn-primary">追加</button>
         </div>
         <div id="email-tags" class="email-tags"></div>
+        <!-- 保存済みグループ -->
+        <div id="saved-groups" class="saved-groups"></div>
+        <div class="email-actions">
+          <button id="save-group-btn" class="btn btn-secondary btn-small" title="現在のメンバーをグループ保存">グループ保存</button>
+        </div>
       </div>
 
       <!-- 検索ボタン -->
