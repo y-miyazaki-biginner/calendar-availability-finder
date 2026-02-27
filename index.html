@@ -115,10 +115,13 @@
 
       <!-- メールアドレス入力 -->
       <div class="input-section">
-        <label>参加者のメールアドレス</label>
+        <label>参加者のメールアドレス（名前でも検索可）</label>
         <div class="email-input-row">
-          <input type="email" id="email-input" placeholder="example@gmail.com" autocomplete="email" list="email-history-list">
-          <datalist id="email-history-list"></datalist>
+          <div class="email-input-wrapper">
+            <input type="text" id="email-input" placeholder="名前 or メールアドレス" autocomplete="off">
+            <datalist id="email-history-list"></datalist>
+            <div id="email-suggestions" class="email-suggestions hidden"></div>
+          </div>
           <button id="add-email-btn" class="btn btn-primary">追加</button>
         </div>
         <div id="email-tags" class="email-tags"></div>
@@ -142,6 +145,21 @@
 
       <!-- 結果表示 -->
       <div id="results" class="results hidden">
+        <!-- 一括操作バー -->
+        <div id="bulk-actions" class="bulk-actions hidden">
+          <div class="bulk-actions-left">
+            <button id="select-all-btn" class="btn btn-secondary btn-small">全選択</button>
+            <button id="deselect-all-btn" class="btn btn-secondary btn-small">全解除</button>
+          </div>
+          <button id="copy-checked-btn" class="btn btn-primary btn-small" disabled>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+            </svg>
+            <span id="copy-checked-label">チェック済みをコピー</span>
+          </button>
+        </div>
+
         <!-- 競合なしセクション -->
         <div id="free-section">
           <h3 class="results-heading results-heading-free">競合なしの候補</h3>
@@ -180,6 +198,7 @@
 
       <!-- フッター -->
       <div class="footer">
+        <div id="unique-email-counter" class="unique-email-counter"></div>
         <button id="logout-btn" class="btn btn-text">ログアウト</button>
       </div>
     </div>

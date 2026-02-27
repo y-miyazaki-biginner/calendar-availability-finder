@@ -6,7 +6,7 @@
 // =====================================================
 const CONFIG = {
   CLIENT_ID: '416943777269-ie7jg6j4tr53j1lqfplvcnhde0rajuls.apps.googleusercontent.com',
-  SCOPES: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.freebusy',
+  SCOPES: 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.freebusy https://www.googleapis.com/auth/contacts.other.readonly https://www.googleapis.com/auth/directory.readonly',
 };
 
 class CalendarAvailabilityFinder {
@@ -136,6 +136,15 @@ class CalendarAvailabilityFinder {
     this.savedGroupsContainer = document.getElementById('saved-groups');
     this.saveGroupBtn = document.getElementById('save-group-btn');
     this.emailHistoryList = document.getElementById('email-history-list');
+    this.emailSuggestions = document.getElementById('email-suggestions');
+    // 一括操作
+    this.bulkActions = document.getElementById('bulk-actions');
+    this.selectAllBtn = document.getElementById('select-all-btn');
+    this.deselectAllBtn = document.getElementById('deselect-all-btn');
+    this.copyCheckedBtn = document.getElementById('copy-checked-btn');
+    this.copyCheckedLabel = document.getElementById('copy-checked-label');
+    // ユニークアドレスカウンター
+    this.uniqueEmailCounter = document.getElementById('unique-email-counter');
   }
 
   bindEvents() {
@@ -145,7 +154,28 @@ class CalendarAvailabilityFinder {
     this.saveSettingsBtn.addEventListener('click', () => this.saveSettings());
     this.addEmailBtn.addEventListener('click', () => this.addEmail());
     this.emailInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') this.addEmail();
+      if (e.key === 'Enter') {
+        // サジェストが表示中ならハイライト項目を選択
+        const highlighted = this.emailSuggestions.querySelector('.suggestion-item.highlighted');
+        if (highlighted && !this.emailSuggestions.classList.contains('hidden')) {
+          highlighted.click();
+          e.preventDefault();
+          return;
+        }
+        this.addEmail();
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        this.navigateSuggestions(e.key === 'ArrowDown' ? 1 : -1);
+        e.preventDefault();
+      } else if (e.key === 'Escape') {
+        this.hideSuggestions();
+      }
+    });
+    this.emailInput.addEventListener('input', () => this.onEmailInputChange());
+    // サジェスト外クリックで閉じる
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.email-input-wrapper')) {
+        this.hideSuggestions();
+      }
     });
     this.searchBtn.addEventListener('click', () => this.searchAvailability());
     this.registerBtn.addEventListener('click', () => this.registerEvents());
@@ -154,6 +184,10 @@ class CalendarAvailabilityFinder {
     this.rangeMode.addEventListener('change', () => this.onRangeModeChange());
     // グループ保存
     this.saveGroupBtn.addEventListener('click', () => this.saveCurrentGroup());
+    // 一括操作
+    this.selectAllBtn.addEventListener('click', () => this.selectAllSlots());
+    this.deselectAllBtn.addEventListener('click', () => this.deselectAllSlots());
+    this.copyCheckedBtn.addEventListener('click', () => this.copyCheckedSlots());
   }
 
   // ============================================================
@@ -185,6 +219,7 @@ class CalendarAvailabilityFinder {
     this.mainSection.classList.remove('hidden');
     this.applySettingsToUI();
     this.renderSavedGroups();
+    this.updateUniqueEmailCounter();
   }
 
   // ============================================================
@@ -329,12 +364,11 @@ class CalendarAvailabilityFinder {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   }
 
-  // メール履歴（datalist用）
+  // 過去に入力したアドレスの履歴（localStorage保存）
   loadEmailHistory() {
     try {
       const history = JSON.parse(localStorage.getItem('emailHistory') || '[]');
       this.emailHistory = history;
-      this.renderEmailHistory();
     } catch {
       this.emailHistory = [];
     }
@@ -344,14 +378,190 @@ class CalendarAvailabilityFinder {
     if (!this.emailHistory.includes(email)) {
       this.emailHistory.push(email);
       localStorage.setItem('emailHistory', JSON.stringify(this.emailHistory));
-      this.renderEmailHistory();
+      this.updateUniqueEmailCounter();
     }
   }
 
-  renderEmailHistory() {
-    this.emailHistoryList.innerHTML = this.emailHistory
-      .map((e) => `<option value="${this.escapeHtml(e)}">`)
+  // ============================================================
+  // People API サジェスト
+  // ============================================================
+  onEmailInputChange() {
+    const query = this.emailInput.value.trim();
+    if (query.length < 2) {
+      this.hideSuggestions();
+      return;
+    }
+    // デバウンス
+    clearTimeout(this._suggestTimer);
+    this._suggestTimer = setTimeout(() => this.fetchSuggestions(query), 300);
+  }
+
+  async fetchSuggestions(query) {
+    const suggestions = [];
+    const lowerQuery = query.toLowerCase();
+    const addIfNew = (entry) => {
+      if (!this.emails.includes(entry.email) && !suggestions.find((s) => s.email === entry.email)) {
+        suggestions.push(entry);
+      }
+    };
+
+    // 1. 過去に入力したアドレス（emailHistory）から検索
+    for (const email of this.emailHistory) {
+      if (email.toLowerCase().includes(lowerQuery)) {
+        addIfNew({ email, name: '' });
+      }
+    }
+
+    // 2. 保存済みグループのメンバーから検索
+    for (const group of (this.savedGroups || [])) {
+      for (const email of group.emails) {
+        if (email.toLowerCase().includes(lowerQuery) ||
+            group.name.toLowerCase().includes(lowerQuery)) {
+          addIfNew({ email, name: `${group.name}` });
+        }
+      }
+    }
+
+    // 3. People APIキャッシュから検索（名前でも検索可）
+    for (const entry of (this._contactCache || [])) {
+      const match = entry.email.toLowerCase().includes(lowerQuery) ||
+                    (entry.name && entry.name.toLowerCase().includes(lowerQuery));
+      if (match) addIfNew(entry);
+    }
+
+    // 4. People API（Directory）で検索（エラーでも無視）
+    if (this.token) {
+      try {
+        const results = await this.searchPeopleAPI(query);
+        for (const r of results) addIfNew(r);
+      } catch (e) {
+        console.log('People API search failed (non-critical):', e.message);
+      }
+    }
+
+    this.showSuggestions(suggestions.slice(0, 8));
+  }
+
+  async searchPeopleAPI(query) {
+    // People API が無効・権限なしの場合は即リターン（エラーにしない）
+    if (this._peopleApiDisabled) return [];
+
+    const results = [];
+
+    // People API - otherContacts (やり取りしたことがある人)
+    try {
+      const params = new URLSearchParams({
+        query,
+        readMask: 'names,emailAddresses',
+        pageSize: '10',
+      });
+      const res = await fetch(
+        `https://people.googleapis.com/v1/otherContacts:search?${params}`,
+        { headers: { 'Authorization': `Bearer ${this.token}` } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        for (const r of (data.results || [])) {
+          const person = r.person;
+          const email = person?.emailAddresses?.[0]?.value;
+          const name = person?.names?.[0]?.displayName || '';
+          if (email) results.push({ email: email.toLowerCase(), name });
+        }
+      } else if (res.status === 403 || res.status === 401) {
+        // People API が有効でない or 権限不足 → 以降のリクエストをスキップ
+        console.log('People API not available (403/401) - using local data only');
+        this._peopleApiDisabled = true;
+        return [];
+      }
+    } catch { /* network error - ignore */ }
+
+    // People API - directory (組織内ディレクトリ - Google Workspace の場合)
+    try {
+      const params = new URLSearchParams({
+        query,
+        readMask: 'names,emailAddresses',
+        pageSize: '10',
+        sources: 'DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE',
+      });
+      const res = await fetch(
+        `https://people.googleapis.com/v1/people:searchDirectoryPeople?${params}`,
+        { headers: { 'Authorization': `Bearer ${this.token}` } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        for (const person of (data.people || [])) {
+          const email = person?.emailAddresses?.[0]?.value;
+          const name = person?.names?.[0]?.displayName || '';
+          if (email && !results.find((r) => r.email === email.toLowerCase())) {
+            results.push({ email: email.toLowerCase(), name });
+          }
+        }
+      }
+      // directory API の 403 は無視（Workspace以外では使えない）
+    } catch { /* network error - ignore */ }
+
+    // コンタクトキャッシュに追加
+    if (!this._contactCache) this._contactCache = [];
+    for (const r of results) {
+      if (!this._contactCache.find((c) => c.email === r.email)) {
+        this._contactCache.push(r);
+      }
+    }
+
+    return results;
+  }
+
+  showSuggestions(suggestions) {
+    if (suggestions.length === 0) {
+      this.hideSuggestions();
+      return;
+    }
+
+    this.emailSuggestions.innerHTML = suggestions
+      .map((s, i) => `
+        <div class="suggestion-item" data-email="${this.escapeHtml(s.email)}" data-index="${i}">
+          <div class="suggestion-name">${s.name ? this.escapeHtml(s.name) : '<span class="suggestion-no-name">名前なし</span>'}</div>
+          <div class="suggestion-email">${this.escapeHtml(s.email)}</div>
+        </div>`)
       .join('');
+
+    this.emailSuggestions.classList.remove('hidden');
+
+    this.emailSuggestions.querySelectorAll('.suggestion-item').forEach((item) => {
+      item.addEventListener('click', () => {
+        this.emailInput.value = item.dataset.email;
+        this.hideSuggestions();
+        this.addEmail();
+      });
+      item.addEventListener('mouseenter', () => {
+        this.emailSuggestions.querySelectorAll('.suggestion-item').forEach((el) => el.classList.remove('highlighted'));
+        item.classList.add('highlighted');
+      });
+    });
+  }
+
+  hideSuggestions() {
+    this.emailSuggestions.classList.add('hidden');
+    this.emailSuggestions.innerHTML = '';
+  }
+
+  navigateSuggestions(direction) {
+    const items = this.emailSuggestions.querySelectorAll('.suggestion-item');
+    if (items.length === 0) return;
+
+    const current = this.emailSuggestions.querySelector('.suggestion-item.highlighted');
+    let idx = -1;
+    if (current) {
+      idx = parseInt(current.dataset.index);
+      current.classList.remove('highlighted');
+    }
+
+    idx += direction;
+    if (idx < 0) idx = items.length - 1;
+    if (idx >= items.length) idx = 0;
+
+    items[idx].classList.add('highlighted');
+    items[idx].scrollIntoView({ block: 'nearest' });
   }
 
   // グループ保存
@@ -370,6 +580,7 @@ class CalendarAvailabilityFinder {
     this.savedGroups.push({ name, emails: [...this.emails] });
     localStorage.setItem('emailGroups', JSON.stringify(this.savedGroups));
     this.renderSavedGroups();
+    this.updateUniqueEmailCounter();
   }
 
   loadGroup(index) {
@@ -385,6 +596,7 @@ class CalendarAvailabilityFinder {
     this.savedGroups.splice(index, 1);
     localStorage.setItem('emailGroups', JSON.stringify(this.savedGroups));
     this.renderSavedGroups();
+    this.updateUniqueEmailCounter();
   }
 
   renderSavedGroups() {
@@ -410,6 +622,27 @@ class CalendarAvailabilityFinder {
     this.savedGroupsContainer.querySelectorAll('.group-delete').forEach((btn) => {
       btn.addEventListener('click', (e) => this.deleteGroup(parseInt(btn.dataset.index), e));
     });
+  }
+
+  // ============================================================
+  // ユニークアドレス数カウンター（参考情報）
+  // ============================================================
+  updateUniqueEmailCounter() {
+    const allEmails = new Set();
+    // 過去に入力したアドレス
+    for (const email of this.emailHistory) {
+      allEmails.add(email.toLowerCase());
+    }
+    // 保存済みグループのメンバー
+    for (const group of (this.savedGroups || [])) {
+      for (const email of group.emails) {
+        allEmails.add(email.toLowerCase());
+      }
+    }
+    const count = allEmails.size;
+    if (this.uniqueEmailCounter) {
+      this.uniqueEmailCounter.textContent = `このツールで使用したユニークアドレス数: ${count}`;
+    }
   }
 
   // ============================================================
@@ -555,6 +788,7 @@ class CalendarAvailabilityFinder {
 
     this.showLoading(true);
     this.results.classList.add('hidden');
+    this.bulkActions.classList.add('hidden');
     this.conflictsSection.classList.add('hidden');
     this.partialSection.classList.add('hidden');
     this.registerPanel.classList.add('hidden');
@@ -636,7 +870,9 @@ class CalendarAvailabilityFinder {
       console.error('FreeBusy API failed:', e.message);
     }
 
-    // Events API で補完（タイトル取得 + 未回答予定の追加）
+    // Events API で補完（タイトル取得 + FreeBusy に含まれない予定の追加）
+    // ※ 「いいえ（declined）」のみ除外。未回答（needsAction）・仮承諾（tentative）・
+    //    attendeesリストにいない場合もすべてbusy扱いにする
     for (const email of this.emails) {
       try {
         const data = await this.apiGetEvents(
@@ -647,10 +883,15 @@ class CalendarAvailabilityFinder {
             if (event.status === 'cancelled') continue;
             if (event.transparency === 'transparent') continue;
 
+            // 出欠確認: 「いいえ（declined）」の場合のみスキップ
             const attendee = event.attendees?.find(
               (a) => a.email?.toLowerCase() === email.toLowerCase() || a.self
             );
-            if (attendee && attendee.responseStatus === 'declined') continue;
+            // declined のみ除外。attendee が見つからない場合も busy 扱い
+            if (attendee && attendee.responseStatus === 'declined') {
+              console.log(`  [除外] ${email}: 「${event.summary}」- declined`);
+              continue;
+            }
 
             let evStart, evEnd, evTitle;
             if (event.start?.dateTime) {
@@ -670,10 +911,12 @@ class CalendarAvailabilityFinder {
               continue;
             }
 
+            // FreeBusy で既に取得済みのbusy期間とマッチするか確認
             let matched = false;
             for (const ev of allEvents) {
               if (ev.email === email && ev.source === 'freebusy') {
                 if (evStart < ev.end && evEnd > ev.start) {
+                  // タイトルを補完
                   if (!ev.title) ev.title = evTitle;
                   matched = true;
                   break;
@@ -681,7 +924,10 @@ class CalendarAvailabilityFinder {
               }
             }
 
+            // FreeBusy に含まれていなかった予定（未回答・ゲスト追加のみ等）を追加
             if (!matched) {
+              const status = attendee ? attendee.responseStatus : 'no-attendee-entry';
+              console.log(`  [追加] ${email}: 「${evTitle}」- FreeBusyに未掲載 (status: ${status})`);
               allEvents.push({
                 email,
                 title: evTitle,
@@ -823,6 +1069,15 @@ class CalendarAvailabilityFinder {
   // ============================================================
   renderResults(freeSlots, partialSlots, conflictsInRange) {
     this.results.classList.remove('hidden');
+
+    // 一括操作バーの表示
+    if (freeSlots.length > 0 || partialSlots.length > 0) {
+      this.bulkActions.classList.remove('hidden');
+      this.copyCheckedBtn.disabled = true;
+      this.copyCheckedLabel.textContent = 'チェック済みをコピー';
+    } else {
+      this.bulkActions.classList.add('hidden');
+    }
 
     if (freeSlots.length === 0) {
       this.freeSlots.innerHTML = `
@@ -968,6 +1223,48 @@ class CalendarAvailabilityFinder {
     const checked = this.getCheckedSlots();
     const title = this.eventTitle.value.trim();
     this.registerBtn.disabled = checked.length === 0 || title.length === 0;
+    // コピーボタンの状態更新
+    if (this.copyCheckedBtn) {
+      this.copyCheckedBtn.disabled = checked.length === 0;
+      this.copyCheckedLabel.textContent = checked.length > 0
+        ? `チェック済みをコピー (${checked.length}件)`
+        : 'チェック済みをコピー';
+    }
+  }
+
+  // ============================================================
+  // 一括選択・解除・コピー
+  // ============================================================
+  selectAllSlots() {
+    document.querySelectorAll('.slot-checkbox').forEach((cb) => { cb.checked = true; });
+    this.onSlotCheckChanged();
+  }
+
+  deselectAllSlots() {
+    document.querySelectorAll('.slot-checkbox').forEach((cb) => { cb.checked = false; });
+    this.onSlotCheckChanged();
+  }
+
+  copyCheckedSlots() {
+    const checked = this.getCheckedSlots();
+    if (checked.length === 0) return;
+
+    const lines = checked.map((s) => {
+      const start = new Date(s.start);
+      const end = new Date(s.end);
+      return `${this.formatDate(start)} ${this.formatTimeRange(start, end)}`;
+    });
+    const text = lines.join('\n');
+
+    navigator.clipboard.writeText(text).then(() => {
+      this.copyCheckedLabel.textContent = 'コピーしました!';
+      setTimeout(() => {
+        const count = this.getCheckedSlots().length;
+        this.copyCheckedLabel.textContent = count > 0
+          ? `チェック済みをコピー (${count}件)`
+          : 'チェック済みをコピー';
+      }, 1500);
+    });
   }
 
   // ============================================================

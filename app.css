@@ -216,18 +216,66 @@ header h2 {
   margin-bottom: 8px;
 }
 .email-input-row { display: flex; gap: 8px; }
-.email-input-row input {
+
+/* Email Input Wrapper & Suggestions */
+.email-input-wrapper {
   flex: 1;
+  position: relative;
+}
+.email-input-wrapper input {
+  width: 100%;
   padding: 10px 12px;
   border: 1px solid #dadce0;
   border-radius: 8px;
   font-size: 14px;
   outline: none;
   transition: border-color 0.2s;
+  font-family: inherit;
 }
-.email-input-row input:focus {
+.email-input-wrapper input:focus {
   border-color: #4285F4;
   box-shadow: 0 0 0 2px rgba(66, 133, 244, 0.2);
+}
+
+.email-suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: white;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 100;
+  margin-top: 4px;
+}
+
+.suggestion-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-bottom: 1px solid #f1f3f4;
+}
+.suggestion-item:last-child { border-bottom: none; }
+.suggestion-item:hover,
+.suggestion-item.highlighted {
+  background: #e8f0fe;
+}
+.suggestion-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #202124;
+}
+.suggestion-no-name {
+  color: #80868b;
+  font-style: italic;
+}
+.suggestion-email {
+  font-size: 12px;
+  color: #5f6368;
+  margin-top: 1px;
 }
 
 .email-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -400,6 +448,16 @@ header h2 {
   text-align: center;
   padding-top: 12px;
   border-top: 1px solid #e8eaed;
+}
+
+.unique-email-counter {
+  font-size: 11px;
+  color: #80868b;
+  margin-bottom: 6px;
+}
+.unique-email-counter .counter-warn {
+  color: #e37400;
+  font-weight: 500;
 }
 
 /* Scrollbar */
@@ -621,6 +679,31 @@ header h2 {
 .btn-small {
   padding: 4px 10px;
   font-size: 12px;
+}
+
+/* Bulk Actions */
+.bulk-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: white;
+  border: 1px solid #e8eaed;
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  gap: 8px;
+}
+.bulk-actions-left {
+  display: flex;
+  gap: 6px;
+}
+.bulk-actions .btn-primary.btn-small {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+.bulk-actions .btn-primary.btn-small:disabled {
+  background: #94b8f0;
+  cursor: not-allowed;
 }
 
 /* Error */
