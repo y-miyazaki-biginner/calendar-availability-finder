@@ -42,11 +42,12 @@ class CalendarAvailabilityFinder {
 
   // ============================================================
   // Google Identity Services (Web OAuth2)
-  // ① ログイン保持: token を sessionStorage に保存し再訪問時に復元
+  // ① ログイン保持: token を localStorage に保存しブラウザを閉じても復元
+  // ② トークン期限切れ時に自動でリフレッシュ（再ログイン不要）
   // ============================================================
   initGoogleAuth() {
-    // sessionStorage から token を復元
-    const savedToken = sessionStorage.getItem('calendarToken');
+    // localStorage から token を復元
+    const savedToken = localStorage.getItem('calendarToken');
     if (savedToken) {
       this.token = savedToken;
       // token が有効か確認
@@ -54,8 +55,10 @@ class CalendarAvailabilityFinder {
         if (valid) {
           this.showMain();
         } else {
-          sessionStorage.removeItem('calendarToken');
+          // トークン期限切れ → GIS初期化完了後に自動リフレッシュ
+          localStorage.removeItem('calendarToken');
           this.token = null;
+          this._needsAutoRefresh = true;
         }
       });
     }
@@ -71,11 +74,16 @@ class CalendarAvailabilityFinder {
               return;
             }
             this.token = response.access_token;
-            // sessionStorage に保存（タブ閉じるまで有効）
-            sessionStorage.setItem('calendarToken', this.token);
+            this._peopleApiDisabled = false; // トークン更新でPeople APIを再有効化
+            localStorage.setItem('calendarToken', this.token);
             this.showMain();
           },
         });
+        // 保存済みトークンが期限切れだった場合、自動でリフレッシュ
+        if (this._needsAutoRefresh) {
+          this._needsAutoRefresh = false;
+          this.refreshToken();
+        }
       } else {
         setTimeout(waitForGis, 100);
       }
@@ -92,6 +100,54 @@ class CalendarAvailabilityFinder {
     } catch {
       return false;
     }
+  }
+
+  // トークンを自動リフレッシュ（prompt: '' でポップアップなしで試みる）
+  refreshToken() {
+    if (!this.tokenClient) return;
+    try {
+      this.tokenClient.requestAccessToken({ prompt: '' });
+    } catch (e) {
+      console.log('Auto-refresh failed, user needs to re-login:', e.message);
+    }
+  }
+
+  // API呼び出しのラッパー: 401/403時にトークンをリフレッシュしてリトライ
+  async fetchWithAuth(url, options = {}) {
+    const headers = { ...options.headers, 'Authorization': `Bearer ${this.token}` };
+    let res = await fetch(url, { ...options, headers });
+
+    if (res.status === 401) {
+      // トークン期限切れ → リフレッシュして1回だけリトライ
+      console.log('Token expired, refreshing...');
+      await this.refreshTokenAndWait();
+      headers['Authorization'] = `Bearer ${this.token}`;
+      res = await fetch(url, { ...options, headers });
+    }
+
+    return res;
+  }
+
+  // リフレッシュしてトークンが更新されるのを待つ
+  refreshTokenAndWait() {
+    return new Promise((resolve) => {
+      const origCallback = this.tokenClient.callback;
+      this.tokenClient.callback = (response) => {
+        if (!response.error) {
+          this.token = response.access_token;
+          this._peopleApiDisabled = false;
+          localStorage.setItem('calendarToken', this.token);
+        }
+        this.tokenClient.callback = origCallback;
+        resolve();
+      };
+      try {
+        this.tokenClient.requestAccessToken({ prompt: '' });
+      } catch {
+        this.tokenClient.callback = origCallback;
+        resolve();
+      }
+    });
   }
 
   // ============================================================
@@ -205,7 +261,7 @@ class CalendarAvailabilityFinder {
     }
     this.token = null;
     this.emails = [];
-    sessionStorage.removeItem('calendarToken');
+    localStorage.removeItem('calendarToken');
     this.showAuth();
   }
 
@@ -443,7 +499,7 @@ class CalendarAvailabilityFinder {
   }
 
   async searchPeopleAPI(query) {
-    // People API が無効・権限なしの場合は即リターン（エラーにしない）
+    // People API が無効（GCPで有効にしていない）場合は即リターン
     if (this._peopleApiDisabled) return [];
 
     const results = [];
@@ -455,9 +511,8 @@ class CalendarAvailabilityFinder {
         readMask: 'names,emailAddresses',
         pageSize: '10',
       });
-      const res = await fetch(
-        `https://people.googleapis.com/v1/otherContacts:search?${params}`,
-        { headers: { 'Authorization': `Bearer ${this.token}` } }
+      const res = await this.fetchWithAuth(
+        `https://people.googleapis.com/v1/otherContacts:search?${params}`
       );
       if (res.ok) {
         const data = await res.json();
@@ -467,9 +522,9 @@ class CalendarAvailabilityFinder {
           const name = person?.names?.[0]?.displayName || '';
           if (email) results.push({ email: email.toLowerCase(), name });
         }
-      } else if (res.status === 403 || res.status === 401) {
-        // People API が有効でない or 権限不足 → 以降のリクエストをスキップ
-        console.log('People API not available (403/401) - using local data only');
+      } else if (res.status === 403) {
+        // People API がGCPで有効でない → 以降のリクエストをスキップ
+        console.log('People API not enabled in GCP - using local data only');
         this._peopleApiDisabled = true;
         return [];
       }
@@ -483,9 +538,8 @@ class CalendarAvailabilityFinder {
         pageSize: '10',
         sources: 'DIRECTORY_SOURCE_TYPE_DOMAIN_PROFILE',
       });
-      const res = await fetch(
-        `https://people.googleapis.com/v1/people:searchDirectoryPeople?${params}`,
-        { headers: { 'Authorization': `Bearer ${this.token}` } }
+      const res = await this.fetchWithAuth(
+        `https://people.googleapis.com/v1/people:searchDirectoryPeople?${params}`
       );
       if (res.ok) {
         const data = await res.json();
@@ -657,6 +711,7 @@ class CalendarAvailabilityFinder {
 
   // ============================================================
   // 検索時間帯内かどうか判定
+  // イベントの時間帯が検索設定の時間帯と重なっているか確認
   // ============================================================
   isWithinSearchTimeRange(eventStart, eventEnd) {
     const [startH, startM] = this.settings.startTime.split(':').map(Number);
@@ -665,21 +720,26 @@ class CalendarAvailabilityFinder {
     const searchEndMin = endH * 60 + endM;
 
     const eventStartMin = eventStart.getHours() * 60 + eventStart.getMinutes();
-    const eventEndMin = eventEnd.getHours() * 60 + eventEnd.getMinutes();
+    // 終日予定（00:00 - 00:00）の場合、終了時刻を検索終了時刻として扱う
+    let eventEndMin = eventEnd.getHours() * 60 + eventEnd.getMinutes();
+    if (eventEndMin === 0 && eventEnd.getDate() !== eventStart.getDate()) {
+      // 日をまたいでいる（終日予定等）→ 検索終了時刻として扱う
+      eventEndMin = searchEndMin;
+    }
 
-    return eventStartMin < searchEndMin && eventEndMin > searchStartMin;
+    // イベントが検索時間帯の完全に外側にある場合はfalse
+    // イベント終了 <= 検索開始 → 外
+    // イベント開始 >= 検索終了 → 外
+    return eventEndMin > searchStartMin && eventStartMin < searchEndMin;
   }
 
   // ============================================================
   // Google Calendar API
   // ============================================================
   async apiQueryFreeBusy(params) {
-    const res = await fetch('https://www.googleapis.com/calendar/v3/freeBusy', {
+    const res = await this.fetchWithAuth('https://www.googleapis.com/calendar/v3/freeBusy', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.token}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(params),
     });
     if (!res.ok) {
@@ -696,9 +756,8 @@ class CalendarAvailabilityFinder {
       orderBy: 'startTime',
       maxResults: '250',
     });
-    const res = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${params}`,
-      { headers: { 'Authorization': `Bearer ${this.token}` } }
+    const res = await this.fetchWithAuth(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${params}`
     );
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -708,14 +767,11 @@ class CalendarAvailabilityFinder {
   }
 
   async apiInsertEvent(eventBody) {
-    const res = await fetch(
+    const res = await this.fetchWithAuth(
       'https://www.googleapis.com/calendar/v3/calendars/primary/events?sendUpdates=none',
       {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${this.token}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(eventBody),
       }
     );
@@ -823,8 +879,9 @@ class CalendarAvailabilityFinder {
       this.lastPartialSlots = partialSlots;
 
       const conflictsInRange = filteredEvents.filter((ev) =>
-        this.isWithinSearchTimeRange(ev.start, ev.end) &&
-        this.settings.activeDays.includes(ev.start.getDay())
+        ev.start < timeMax && ev.end > timeMin &&          // 検索日付範囲内
+        this.settings.activeDays.includes(ev.start.getDay()) && // 対象曜日
+        this.isWithinSearchTimeRange(ev.start, ev.end)     // 検索時間帯内
       );
 
       this.renderResults(freeSlots, partialSlots, conflictsInRange);
