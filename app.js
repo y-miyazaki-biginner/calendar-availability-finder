@@ -24,6 +24,8 @@ class CalendarAvailabilityFinder {
       meetingDuration: 30,
       activeDays: [1, 2, 3, 4, 5],
       excludeKeywords: ['画面操作'],
+      recurringMode: 'off',    // 'off', 'weekly', 'biweekly'
+      recurringWeeks: 4,       // 何週間分チェックするか
     };
     this.lastFreeSlots = [];
     this.lastPartialSlots = [];
@@ -201,6 +203,10 @@ class CalendarAvailabilityFinder {
     this.copyCheckedLabel = document.getElementById('copy-checked-label');
     // ユニークアドレスカウンター
     this.uniqueEmailCounter = document.getElementById('unique-email-counter');
+    // 定例検索
+    this.recurringMode = document.getElementById('recurring-mode');
+    this.recurringWeeks = document.getElementById('recurring-weeks');
+    this.recurringWeeksGroup = document.getElementById('recurring-weeks-group');
   }
 
   bindEvents() {
@@ -240,6 +246,10 @@ class CalendarAvailabilityFinder {
     this.rangeMode.addEventListener('change', () => this.onRangeModeChange());
     // グループ保存
     this.saveGroupBtn.addEventListener('click', () => this.saveCurrentGroup());
+    // 定例検索モード切替
+    if (this.recurringMode) {
+      this.recurringMode.addEventListener('change', () => this.onRecurringModeChange());
+    }
     // 一括操作
     this.selectAllBtn.addEventListener('click', () => this.selectAllSlots());
     this.deselectAllBtn.addEventListener('click', () => this.deselectAllSlots());
@@ -311,6 +321,12 @@ class CalendarAvailabilityFinder {
       if (cb.checked) this.settings.activeDays.push(parseInt(cb.value));
     });
 
+    // 定例検索設定
+    if (this.recurringMode) {
+      this.settings.recurringMode = this.recurringMode.value;
+      this.settings.recurringWeeks = parseInt(this.recurringWeeks.value);
+    }
+
     localStorage.setItem('calendarSettings', JSON.stringify(this.settings));
     this.saveSettingsBtn.textContent = '保存しました!';
     setTimeout(() => {
@@ -343,6 +359,13 @@ class CalendarAvailabilityFinder {
       cb.checked = this.settings.activeDays.includes(parseInt(cb.value));
     });
 
+    // 定例検索
+    if (this.recurringMode) {
+      this.recurringMode.value = this.settings.recurringMode || 'off';
+      this.recurringWeeks.value = this.settings.recurringWeeks || 4;
+      this.onRecurringModeChange();
+    }
+
     this.onRangeModeChange();
   }
 
@@ -354,6 +377,16 @@ class CalendarAvailabilityFinder {
     } else {
       this.relativeRangeGroup.classList.add('hidden');
       this.absoluteRangeGroup.classList.remove('hidden');
+    }
+  }
+
+  onRecurringModeChange() {
+    if (!this.recurringMode) return;
+    const mode = this.recurringMode.value;
+    if (mode === 'off') {
+      this.recurringWeeksGroup.classList.add('hidden');
+    } else {
+      this.recurringWeeksGroup.classList.remove('hidden');
     }
   }
 
@@ -719,17 +752,24 @@ class CalendarAvailabilityFinder {
     const searchStartMin = startH * 60 + startM;
     const searchEndMin = endH * 60 + endM;
 
-    const eventStartMin = eventStart.getHours() * 60 + eventStart.getMinutes();
-    // 終日予定（00:00 - 00:00）の場合、終了時刻を検索終了時刻として扱う
-    let eventEndMin = eventEnd.getHours() * 60 + eventEnd.getMinutes();
-    if (eventEndMin === 0 && eventEnd.getDate() !== eventStart.getDate()) {
-      // 日をまたいでいる（終日予定等）→ 検索終了時刻として扱う
-      eventEndMin = searchEndMin;
+    // イベントが日をまたぐ場合（終日予定をFreeBusyが返した場合など）は
+    // 検索時間帯と必ず重なるのでtrue
+    const durationMs = eventEnd.getTime() - eventStart.getTime();
+    const durationHours = durationMs / (1000 * 60 * 60);
+    if (durationHours >= 24) {
+      return true;
     }
 
-    // イベントが検索時間帯の完全に外側にある場合はfalse
-    // イベント終了 <= 検索開始 → 外
-    // イベント開始 >= 検索終了 → 外
+    const eventStartMin = eventStart.getHours() * 60 + eventStart.getMinutes();
+    let eventEndMin = eventEnd.getHours() * 60 + eventEnd.getMinutes();
+
+    // 日をまたぐイベント（例: 23:00〜翌01:00）や
+    // 終日予定の端数（00:00終了）を処理
+    if (eventEndMin === 0 && eventEnd.getDate() !== eventStart.getDate()) {
+      eventEndMin = 24 * 60; // 24:00として扱う
+    }
+
+    // イベントが検索時間帯と重なっているか
     return eventEndMin > searchStartMin && eventStartMin < searchEndMin;
   }
 
@@ -816,6 +856,21 @@ class CalendarAvailabilityFinder {
       timeMax.setHours(23, 59, 59, 0);
     }
 
+    // 定例検索モードの場合、チェック週数分の範囲を確保
+    const recurringMode = this.settings.recurringMode || 'off';
+    if (recurringMode !== 'off') {
+      const recurringWeeks = this.settings.recurringWeeks || 4;
+      const weekInterval = recurringMode === 'biweekly' ? 2 : 1;
+      const requiredDays = recurringWeeks * weekInterval * 7;
+      const requiredMax = new Date(timeMin);
+      requiredMax.setDate(requiredMax.getDate() + requiredDays);
+      requiredMax.setHours(23, 59, 59, 0);
+      if (requiredMax > timeMax) {
+        timeMax = requiredMax;
+        console.log(`[定例検索] 検索範囲を${recurringWeeks * weekInterval}週間分に拡張`);
+      }
+    }
+
     console.log(`[日程調整ツール] 検索範囲: ${timeMin.toLocaleString()} 〜 ${timeMax.toLocaleString()}`);
     return { timeMin, timeMax };
   }
@@ -842,6 +897,12 @@ class CalendarAvailabilityFinder {
       if (cb.checked) this.settings.activeDays.push(parseInt(cb.value));
     });
 
+    // 定例検索設定
+    if (this.recurringMode) {
+      this.settings.recurringMode = this.recurringMode.value;
+      this.settings.recurringWeeks = parseInt(this.recurringWeeks.value);
+    }
+
     this.showLoading(true);
     this.results.classList.add('hidden');
     this.bulkActions.classList.add('hidden');
@@ -855,15 +916,23 @@ class CalendarAvailabilityFinder {
 
       const allEvents = await this.getAllEvents(timeMin, timeMax);
 
-      console.log(`[日程調整ツール] 取得イベント数: ${allEvents.length}`);
-      for (const ev of allEvents) {
-        console.log(`  ${ev.email}: 「${ev.title}」 ${ev.start.toLocaleString()} - ${ev.end.toLocaleString()}`);
-      }
+      console.log(`\n[日程調整ツール] 合計取得イベント数: ${allEvents.length} (FreeBusy + Events API)`);
 
       const filteredEvents = allEvents.filter(
         (ev) => !this.shouldExcludeEvent(ev.title)
       );
-      console.log(`[日程調整ツール] 除外後イベント数: ${filteredEvents.length}`);
+
+      const excludedEvents = allEvents.filter((ev) => this.shouldExcludeEvent(ev.title));
+      if (excludedEvents.length > 0) {
+        console.log(`\n[除外キーワード] ${excludedEvents.length}件を除外:`);
+        for (const ev of excludedEvents) {
+          console.log(`  ❌ ${ev.email}: 「${ev.title}」 ${ev.start.toLocaleString()} - ${ev.end.toLocaleString()}`);
+        }
+      }
+      console.log(`\n[日程調整ツール] 最終busy期間: ${filteredEvents.length}件`);
+      for (const ev of filteredEvents) {
+        console.log(`  ✅ ${ev.email}: 「${ev.title}」 ${ev.start.toLocaleString()} - ${ev.end.toLocaleString()} [${ev.source}]`);
+      }
 
       const busyPeriods = filteredEvents.map((ev) => ({
         email: ev.email,
@@ -875,16 +944,24 @@ class CalendarAvailabilityFinder {
         timeMin, timeMax, busyPeriods
       );
 
-      this.lastFreeSlots = freeSlots;
-      this.lastPartialSlots = partialSlots;
-
       const conflictsInRange = filteredEvents.filter((ev) =>
         ev.start < timeMax && ev.end > timeMin &&          // 検索日付範囲内
         this.settings.activeDays.includes(ev.start.getDay()) && // 対象曜日
         this.isWithinSearchTimeRange(ev.start, ev.end)     // 検索時間帯内
       );
 
-      this.renderResults(freeSlots, partialSlots, conflictsInRange);
+      // 定例検索モードの場合、毎週/隔週で空いている曜日×時間帯を抽出
+      const recurringMode = this.settings.recurringMode || 'off';
+      if (recurringMode !== 'off') {
+        const recurringResults = this.findRecurringSlots(freeSlots, partialSlots, timeMin, timeMax);
+        this.lastFreeSlots = [];
+        this.lastPartialSlots = [];
+        this.renderRecurringResults(recurringResults, conflictsInRange);
+      } else {
+        this.lastFreeSlots = freeSlots;
+        this.lastPartialSlots = partialSlots;
+        this.renderResults(freeSlots, partialSlots, conflictsInRange);
+      }
     } catch (error) {
       this.showError(error.message);
     } finally {
@@ -895,6 +972,14 @@ class CalendarAvailabilityFinder {
   async getAllEvents(timeMin, timeMax) {
     const allEvents = [];
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+    console.log(`\n========================================`);
+    console.log(`[日程調整ツール] デバッグ: 検索開始`);
+    console.log(`  検索範囲: ${timeMin.toLocaleString()} 〜 ${timeMax.toLocaleString()}`);
+    console.log(`  検索時間帯: ${this.settings.startTime} 〜 ${this.settings.endTime}`);
+    console.log(`  対象メール: ${this.emails.join(', ')}`);
+    console.log(`  除外キーワード: ${(this.settings.excludeKeywords || []).join(', ') || '(なし)'}`);
+    console.log(`========================================\n`);
 
     // FreeBusy API をメインに使う
     try {
@@ -908,18 +993,26 @@ class CalendarAvailabilityFinder {
       for (const email of this.emails) {
         const cal = fbData.calendars?.[email];
         if (cal?.errors) {
-          console.warn(`FreeBusy error for ${email}:`, cal.errors);
+          console.warn(`[FreeBusy] ⚠ ${email} エラー:`, cal.errors);
         }
         if (cal?.busy) {
+          console.log(`[FreeBusy] ${email}: ${cal.busy.length}件のbusy期間`);
           for (const b of cal.busy) {
+            const start = new Date(b.start);
+            const end = new Date(b.end);
+            const durationHours = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+
+            console.log(`  📅 ${start.toLocaleString()} 〜 ${end.toLocaleString()} (${durationHours.toFixed(1)}h)`);
             allEvents.push({
               email,
               title: '',
-              start: new Date(b.start),
-              end: new Date(b.end),
+              start,
+              end,
               source: 'freebusy',
             });
           }
+        } else {
+          console.log(`[FreeBusy] ${email}: busy期間なし`);
         }
       }
       console.log(`[日程調整ツール] FreeBusy で ${allEvents.length} 件のbusy期間を取得`);
@@ -930,43 +1023,56 @@ class CalendarAvailabilityFinder {
     // Events API で補完（タイトル取得 + FreeBusy に含まれない予定の追加）
     // ※ 「いいえ（declined）」のみ除外。未回答（needsAction）・仮承諾（tentative）・
     //    attendeesリストにいない場合もすべてbusy扱いにする
+    // また、終日予定（start.date）は対象外とし、FreeBusyのbusy期間からも除去する
+    const allDayPeriods = []; // 終日予定のbusy期間（後でFreeBusyから除去用）
+
     for (const email of this.emails) {
       try {
         const data = await this.apiGetEvents(
           email, timeMin.toISOString(), timeMax.toISOString()
         );
+        console.log(`\n[Events API] ${email}: ${data.items?.length || 0}件のイベント取得`);
         if (data.items) {
           for (const event of data.items) {
-            if (event.status === 'cancelled') continue;
-            if (event.transparency === 'transparent') continue;
+            if (event.status === 'cancelled') {
+              console.log(`  [スキップ] 「${event.summary}」- cancelled`);
+              continue;
+            }
+            if (event.transparency === 'transparent') {
+              console.log(`  [スキップ] 「${event.summary}」- transparent (公開設定: 予定あり→外)`);
+              continue;
+            }
 
             // 出欠確認: 「いいえ（declined）」の場合のみスキップ
             const attendee = event.attendees?.find(
               (a) => a.email?.toLowerCase() === email.toLowerCase() || a.self
             );
+            const responseStatus = attendee ? attendee.responseStatus : 'no-attendee-entry';
+
             // declined のみ除外。attendee が見つからない場合も busy 扱い
             if (attendee && attendee.responseStatus === 'declined') {
-              console.log(`  [除外] ${email}: 「${event.summary}」- declined`);
+              console.log(`  [除外] ${email}: 「${event.summary}」- declined（いいえ）`);
               continue;
             }
 
-            let evStart, evEnd, evTitle;
-            if (event.start?.dateTime) {
-              evStart = new Date(event.start.dateTime);
-              evEnd = new Date(event.end.dateTime);
-              evTitle = event.summary || '(タイトルなし)';
-            } else if (event.start?.date) {
-              const eventDate = new Date(event.start.date);
-              const [sh, sm] = this.settings.startTime.split(':').map(Number);
-              const [eh, em] = this.settings.endTime.split(':').map(Number);
-              evStart = new Date(eventDate);
-              evStart.setHours(sh, sm, 0, 0);
-              evEnd = new Date(eventDate);
-              evEnd.setHours(eh, em, 0, 0);
-              evTitle = event.summary || '(終日予定)';
-            } else {
+            // 終日予定 (start.date) は対象外にする（祝日・休暇ラベル等）
+            // FreeBusyに含まれている可能性があるので、後で除去するためperiodを記録
+            if (event.start?.date) {
+              console.log(`  [終日除外] 「${event.summary}」- 終日予定のため対象外 (${event.start.date}〜${event.end.date})`);
+              // 終日予定のUTC期間を記録（FreeBusyが返す形式と合わせる）
+              const adStart = new Date(event.start.date + 'T00:00:00Z');
+              const adEnd = new Date(event.end.date + 'T00:00:00Z');
+              allDayPeriods.push({ email, start: adStart, end: adEnd });
               continue;
             }
+
+            if (!event.start?.dateTime) continue;
+
+            console.log(`  [処理] 「${event.summary}」 status=${responseStatus} start=${event.start.dateTime} end=${event.end.dateTime}`);
+
+            const evTitle = event.summary || '(タイトルなし)';
+            const evStart = new Date(event.start.dateTime);
+            const evEnd = new Date(event.end.dateTime);
 
             // FreeBusy で既に取得済みのbusy期間とマッチするか確認
             let matched = false;
@@ -981,10 +1087,9 @@ class CalendarAvailabilityFinder {
               }
             }
 
-            // FreeBusy に含まれていなかった予定（未回答・ゲスト追加のみ等）を追加
+            // FreeBusy に含まれていなかった予定を追加
             if (!matched) {
-              const status = attendee ? attendee.responseStatus : 'no-attendee-entry';
-              console.log(`  [追加] ${email}: 「${evTitle}」- FreeBusyに未掲載 (status: ${status})`);
+              console.log(`  [追加] ${email}: 「${evTitle}」${evStart.toLocaleString()} - ${evEnd.toLocaleString()} - FreeBusyに未掲載 (status: ${responseStatus})`);
               allEvents.push({
                 email,
                 title: evTitle,
@@ -996,7 +1101,32 @@ class CalendarAvailabilityFinder {
           }
         }
       } catch (e) {
-        console.log(`Events API failed for ${email} (OK - using FreeBusy data): ${e.message}`);
+        // Events APIアクセス不可の場合、終日予定の除外もできないが
+        // FreeBusyデータをそのまま使う（終日予定がbusyに含まれる可能性あり）
+        console.log(`[Events API] ⚠ ${email}: アクセス不可 - FreeBusyデータのみ使用 (${e.message})`);
+      }
+    }
+
+    // 終日予定に「完全に包含される」FreeBusy busy期間を除去
+    // ※ 注意: FreeBusyが通常予定を連結した24h超の期間は、終日予定とは別物なので除外しない
+    // 終日予定と完全に一致（start/endが同じ）するもののみ除去
+    if (allDayPeriods.length > 0) {
+      const beforeCount = allEvents.length;
+      for (let i = allEvents.length - 1; i >= 0; i--) {
+        const ev = allEvents[i];
+        if (ev.source !== 'freebusy') continue;
+        for (const adp of allDayPeriods) {
+          if (ev.email !== adp.email) continue;
+          // FreeBusyのbusy期間が終日予定の範囲に完全に包含されているか
+          if (ev.start >= adp.start && ev.end <= adp.end) {
+            console.log(`  [終日除去] FreeBusy busy期間を除去: ${ev.email} ${ev.start.toLocaleString()} 〜 ${ev.end.toLocaleString()}`);
+            allEvents.splice(i, 1);
+            break;
+          }
+        }
+      }
+      if (beforeCount !== allEvents.length) {
+        console.log(`[終日除外] ${beforeCount - allEvents.length}件のFreeBusy busy期間を終日予定として除去`);
       }
     }
 
@@ -1122,10 +1252,305 @@ class CalendarAvailabilityFinder {
   }
 
   // ============================================================
+  // 定例候補日程の抽出（毎週 / 隔週）
+  // ============================================================
+  findRecurringSlots(freeSlots, partialSlots, timeMin, timeMax) {
+    const mode = this.settings.recurringMode; // 'weekly' or 'biweekly'
+    const checkWeeks = this.settings.recurringWeeks || 4;
+    const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+
+    // 各曜日が検索範囲内に何回出現するかを正確に計算
+    const dayOccurrences = {};  // { 0:日曜の回数, 1:月曜の回数, ... }
+    for (let d = 0; d < 7; d++) dayOccurrences[d] = 0;
+    const countDay = new Date(timeMin);
+    countDay.setHours(0, 0, 0, 0);
+    const countEnd = new Date(timeMax);
+    countEnd.setHours(23, 59, 59, 0);
+    while (countDay <= countEnd) {
+      dayOccurrences[countDay.getDay()]++;
+      countDay.setDate(countDay.getDate() + 1);
+    }
+
+    console.log(`[定例検索] 各曜日の出現回数:`, Object.entries(dayOccurrences).map(([d, c]) => `${dayNames[d]}=${c}`).join(', '));
+
+    // 全スロット（free のみ使用。partialは「全員空き」ではないので定例候補には不適格）
+    // ただし partial も「ほぼ空き」として別枠で集計
+    const freeByKey = {};   // "dayOfWeek-HH:MM" → 週ごとの出現
+    const partialByKey = {};
+
+    const addToMap = (map, slot) => {
+      const dow = slot.start.getDay();
+      const timeKey = `${String(slot.start.getHours()).padStart(2, '0')}:${String(slot.start.getMinutes()).padStart(2, '0')}`;
+      const key = `${dow}-${timeKey}`;
+      if (!map[key]) {
+        map[key] = {
+          dayOfWeek: dow,
+          dayName: dayNames[dow],
+          timeStart: timeKey,
+          timeEnd: `${String(slot.end.getHours()).padStart(2, '0')}:${String(slot.end.getMinutes()).padStart(2, '0')}`,
+          dates: [],  // 出現した日付リスト
+        };
+      }
+      // 同じ日付の重複を避ける
+      const dateStr = slot.start.toDateString();
+      if (!map[key].dates.find((d) => d.dateStr === dateStr)) {
+        map[key].dates.push({ dateStr, slot });
+      }
+    };
+
+    for (const s of freeSlots) addToMap(freeByKey, s);
+    // partial も free 側にマージ（「空きまたは一部競合」として集計するため）
+    for (const s of partialSlots) addToMap(partialByKey, s);
+
+    // 結果
+    const recurringFree = [];   // 全週空き（全員空き）
+    const recurringPartial = []; // ほぼ空き
+
+    // freeByKey に存在するキーをベースに判定
+    const allKeys = new Set([...Object.keys(freeByKey), ...Object.keys(partialByKey)]);
+
+    for (const key of allKeys) {
+      const freeData = freeByKey[key];
+      const partialData = partialByKey[key];
+
+      // どちらかのデータから基本情報を取得
+      const baseData = freeData || partialData;
+      const dow = baseData.dayOfWeek;
+      const totalOccurrences = dayOccurrences[dow]; // この曜日が範囲内に出現する回数
+      const targetWeeks = Math.min(checkWeeks, totalOccurrences);
+
+      if (targetWeeks <= 0) continue;
+
+      // free（全員空き）で出現した回数
+      const freeCount = freeData ? freeData.dates.length : 0;
+
+      if (mode === 'biweekly') {
+        // 隔週: 日付を出現順でインデックス付けし、偶数番目/奇数番目でチェック
+        // （例: 月曜が3/10,3/17,3/24,3/31の順なら index 0,1,2,3）
+
+        // この曜日のfreeスロットの出現日を日付順に取得
+        const freeDatesSorted = freeData
+          ? [...freeData.dates].sort((a, b) => a.slot.start - b.slot.start)
+          : [];
+
+        // この曜日の全出現日リスト（free/partial/busyすべて含む）を日付順に構築
+        // → dayOccurrences[dow] 回分のインデックスを割り当て
+        // free出現日のインデックスを特定する
+        const allDayDates = [];
+        const tmpDay = new Date(timeMin);
+        tmpDay.setHours(0, 0, 0, 0);
+        while (tmpDay <= countEnd) {
+          if (tmpDay.getDay() === dow) {
+            allDayDates.push(tmpDay.toDateString());
+          }
+          tmpDay.setDate(tmpDay.getDate() + 1);
+        }
+
+        // freeスロットの日付がallDayDatesの何番目かを調べる
+        const freeIndices = new Set();
+        for (const fd of freeDatesSorted) {
+          const idx = allDayDates.indexOf(fd.dateStr);
+          if (idx >= 0) freeIndices.add(idx);
+        }
+
+        for (const startOffset of [0, 1]) {
+          // 隔週パターン: startOffset, startOffset+2, startOffset+4, ...
+          const patternIndices = [];
+          for (let i = startOffset; i < allDayDates.length; i += 2) {
+            patternIndices.push(i);
+          }
+          const biweeklyTarget = Math.min(checkWeeks, patternIndices.length);
+          if (biweeklyTarget <= 0) continue;
+
+          // このパターンに含まれる週のうち free の数
+          const freeInPattern = patternIndices.filter((i) => freeIndices.has(i)).length;
+
+          if (freeInPattern >= biweeklyTarget) {
+            recurringFree.push({
+              ...baseData,
+              matchCount: freeInPattern,
+              totalExpected: biweeklyTarget,
+              label: startOffset === 0 ? '偶数週' : '奇数週',
+            });
+          } else if (freeInPattern >= biweeklyTarget - 1) {
+            recurringPartial.push({
+              ...baseData,
+              matchCount: freeInPattern,
+              totalExpected: biweeklyTarget,
+              label: startOffset === 0 ? '偶数週' : '奇数週',
+            });
+          }
+        }
+      } else {
+        // 毎週: この曜日×時間帯が targetWeeks 回以上 free か
+        if (freeCount >= targetWeeks) {
+          recurringFree.push({
+            ...baseData,
+            matchCount: freeCount,
+            totalExpected: targetWeeks,
+          });
+        } else if (freeCount >= targetWeeks - 1) {
+          // 1週だけ不足 → ほぼ空き
+          recurringPartial.push({
+            ...baseData,
+            matchCount: freeCount,
+            totalExpected: targetWeeks,
+          });
+        }
+      }
+    }
+
+    // 重複排除（隔週で偶数/奇数の両方にマッチした場合）
+    const dedup = (arr) => {
+      const seen = new Set();
+      return arr.filter((item) => {
+        const key = `${item.dayOfWeek}-${item.timeStart}-${item.label || ''}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+
+    // 曜日 → 時間帯でソート
+    const sortFn = (a, b) => {
+      if (a.dayOfWeek !== b.dayOfWeek) return a.dayOfWeek - b.dayOfWeek;
+      return a.timeStart.localeCompare(b.timeStart);
+    };
+
+    const resultFree = dedup(recurringFree).sort(sortFn);
+    const resultPartial = dedup(recurringPartial).sort(sortFn);
+
+    console.log(`[定例検索] mode=${mode} checkWeeks=${checkWeeks}`);
+    console.log(`  全週空き=${resultFree.length}件 ほぼ空き=${resultPartial.length}件`);
+    for (const r of resultFree) {
+      console.log(`  ✅ ${r.dayName}曜 ${r.timeStart}-${r.timeEnd} (${r.matchCount}/${r.totalExpected}週 free) ${r.label || ''}`);
+    }
+    for (const r of resultPartial) {
+      console.log(`  ⚠ ${r.dayName}曜 ${r.timeStart}-${r.timeEnd} (${r.matchCount}/${r.totalExpected}週 free) ${r.label || ''}`);
+    }
+
+    return { recurringFree: resultFree, recurringPartial: resultPartial };
+  }
+
+  renderRecurringResults(recurringResults, conflictsInRange) {
+    const { recurringFree, recurringPartial } = recurringResults;
+    const modeLabel = this.settings.recurringMode === 'biweekly' ? '隔週' : '毎週';
+
+    this.results.classList.remove('hidden');
+    this.bulkActions.classList.add('hidden'); // 定例モードでは一括操作不要
+    this.registerPanel.classList.add('hidden');
+
+    // 競合なしセクション → 定例候補
+    if (recurringFree.length === 0) {
+      this.freeSlots.innerHTML = `
+        <div class="no-results">
+          <p>${modeLabel}で全員が空いている時間帯は見つかりませんでした。</p>
+          <p style="font-size: 12px; margin-top: 4px;">下の「ほぼ毎週空き」セクションを確認してください。</p>
+        </div>`;
+    } else {
+      this.freeSlots.innerHTML = this.renderRecurringCards(recurringFree, 'free', modeLabel);
+    }
+
+    // Section heading update
+    const freeHeading = this.freeSection?.querySelector('.results-heading-free');
+    if (freeHeading) freeHeading.textContent = `${modeLabel}空きの候補`;
+
+    // 競合少セクション → ほぼ空き
+    if (recurringPartial.length > 0) {
+      this.partialSection.classList.remove('hidden');
+      this.partialSlots.innerHTML = this.renderRecurringCards(recurringPartial, 'partial', modeLabel);
+      const partialHeading = this.partialSection?.querySelector('.results-heading-partial');
+      if (partialHeading) partialHeading.textContent = `${modeLabel}ほぼ空きの候補（一部週に競合あり）`;
+    } else {
+      this.partialSection.classList.add('hidden');
+    }
+
+    // 競合する予定
+    if (conflictsInRange.length > 0) {
+      this.conflictsSection.classList.remove('hidden');
+      const byPerson = {};
+      for (const c of conflictsInRange) {
+        if (!byPerson[c.email]) byPerson[c.email] = [];
+        byPerson[c.email].push(c);
+      }
+      let html = '';
+      for (const [email, events] of Object.entries(byPerson)) {
+        html += `<div style="font-size: 13px; font-weight: 600; margin: 8px 0 4px; color: #202124;">${this.escapeHtml(email)}</div>`;
+        for (const event of events) {
+          html += `
+            <div class="conflict-card">
+              <div class="conflict-title">${this.escapeHtml(event.title)}</div>
+              <div class="conflict-time">${this.formatDate(event.start)} ${this.formatTimeRange(event.start, event.end)}</div>
+            </div>`;
+        }
+      }
+      this.conflictsList.innerHTML = html;
+    } else {
+      this.conflictsSection.classList.add('hidden');
+    }
+  }
+
+  renderRecurringCards(items, type, modeLabel) {
+    const dayNames = ['日', '月', '火', '水', '木', '金', '土'];
+    let html = '';
+
+    // 曜日でグループ化
+    const byDay = {};
+    for (const item of items) {
+      if (!byDay[item.dayOfWeek]) byDay[item.dayOfWeek] = [];
+      byDay[item.dayOfWeek].push(item);
+    }
+
+    for (const [dow, dayItems] of Object.entries(byDay)) {
+      html += `<div class="slot-date">${modeLabel} ${dayNames[parseInt(dow)]}曜日</div>`;
+      for (const item of dayItems) {
+        const biweeklyLabel = item.label ? ` (${item.label})` : '';
+        const badge = type === 'partial'
+          ? `<span class="slot-conflict-badge">${item.matchCount}/${item.totalExpected}週空き</span>`
+          : `<span class="slot-recurring-badge">${item.matchCount}週連続空き</span>`;
+
+        const copyText = `${modeLabel} ${dayNames[parseInt(dow)]}曜 ${item.timeStart} - ${item.timeEnd}${biweeklyLabel}`;
+
+        html += `
+          <div class="slot-card slot-card-${type}">
+            <div class="slot-header">
+              <div>
+                <span class="slot-time">${item.timeStart} - ${item.timeEnd}${biweeklyLabel}</span>
+                ${badge}
+              </div>
+              <button class="btn btn-copy" data-copy="${this.escapeHtml(copyText)}">コピー</button>
+            </div>
+          </div>`;
+      }
+    }
+
+    // コピーボタンのイベント付与（renderの後に呼ぶ必要あり）
+    setTimeout(() => {
+      this.results.querySelectorAll('.btn-copy').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          navigator.clipboard.writeText(btn.dataset.copy);
+          btn.textContent = 'コピー済み';
+          setTimeout(() => { btn.textContent = 'コピー'; }, 1500);
+        });
+      });
+    }, 0);
+
+    return html;
+  }
+
+  // ============================================================
   // Rendering
   // ============================================================
   renderResults(freeSlots, partialSlots, conflictsInRange) {
     this.results.classList.remove('hidden');
+
+    // 通常モード: 見出しを元に戻す
+    const freeHeading = this.freeSection?.querySelector('.results-heading-free');
+    if (freeHeading) freeHeading.textContent = '競合なしの候補';
+    const partialHeading = this.partialSection?.querySelector('.results-heading-partial');
+    if (partialHeading) partialHeading.textContent = '競合ありの候補（競合が少ない順）';
 
     // 一括操作バーの表示
     if (freeSlots.length > 0 || partialSlots.length > 0) {
