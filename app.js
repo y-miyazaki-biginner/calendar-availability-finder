@@ -29,6 +29,13 @@ class CalendarAvailabilityFinder {
     };
     this.lastFreeSlots = [];
     this.lastPartialSlots = [];
+    // 追加検索: キャッシュ
+    this._cachedBusyPeriods = [];
+    this._cachedConflicts = [];
+    this._cachedAllSlots = [];
+    this._cachedTimeMin = null;
+    this._cachedTimeMax = null;
+    this._currentMaxOverlap = 0; // 現在表示済みの最大被り件数
 
     this.init();
   }
@@ -207,6 +214,12 @@ class CalendarAvailabilityFinder {
     this.recurringMode = document.getElementById('recurring-mode');
     this.recurringWeeks = document.getElementById('recurring-weeks');
     this.recurringWeeksGroup = document.getElementById('recurring-weeks-group');
+    // 追加検索する
+    this.moreSearchSection = document.getElementById('more-search-section');
+    this.moreSearchBtn = document.getElementById('more-search-btn');
+    this.moreSearchLabel = document.getElementById('more-search-label');
+    this.moreSearchHint = document.getElementById('more-search-hint');
+    this.additionalResultsSection = document.getElementById('additional-results-section');
   }
 
   bindEvents() {
@@ -254,6 +267,8 @@ class CalendarAvailabilityFinder {
     this.selectAllBtn.addEventListener('click', () => this.selectAllSlots());
     this.deselectAllBtn.addEventListener('click', () => this.deselectAllSlots());
     this.copyCheckedBtn.addEventListener('click', () => this.copyCheckedSlots());
+    // 追加検索する
+    this.moreSearchBtn.addEventListener('click', () => this.expandSearch());
   }
 
   // ============================================================
@@ -910,6 +925,9 @@ class CalendarAvailabilityFinder {
     this.partialSection.classList.add('hidden');
     this.registerPanel.classList.add('hidden');
     this.registerStatus.classList.add('hidden');
+    this.moreSearchSection.classList.add('hidden');
+    this.additionalResultsSection.classList.add('hidden');
+    this.additionalResultsSection.innerHTML = '';
 
     try {
       const { timeMin, timeMax } = this.getSearchRange();
@@ -940,27 +958,34 @@ class CalendarAvailabilityFinder {
         end: ev.end,
       }));
 
-      const { freeSlots, partialSlots } = this.findAllSlots(
-        timeMin, timeMax, busyPeriods
-      );
-
       const conflictsInRange = filteredEvents.filter((ev) =>
         ev.start < timeMax && ev.end > timeMin &&          // 検索日付範囲内
         this.settings.activeDays.includes(ev.start.getDay()) && // 対象曜日
         this.isWithinSearchTimeRange(ev.start, ev.end)     // 検索時間帯内
       );
 
+      // キャッシュ保存（「追加検索する」で再利用）
+      this._cachedBusyPeriods = busyPeriods;
+      this._cachedConflicts = conflictsInRange;
+      this._cachedTimeMin = timeMin;
+      this._cachedTimeMax = timeMax;
+      this._currentMaxOverlap = 0; // 初期閾値（初回検索結果の後に設定される）
+      this.additionalResultsSection.innerHTML = '';
+      this.additionalResultsSection.classList.add('hidden');
+
       // 定例検索モードの場合、毎週/隔週で空いている曜日×時間帯を抽出
       const recurringMode = this.settings.recurringMode || 'off';
       if (recurringMode !== 'off') {
+        const { freeSlots, partialSlots } = this.findAllSlots(
+          timeMin, timeMax, busyPeriods
+        );
         const recurringResults = this.findRecurringSlots(freeSlots, partialSlots, timeMin, timeMax);
         this.lastFreeSlots = [];
         this.lastPartialSlots = [];
         this.renderRecurringResults(recurringResults, conflictsInRange);
+        this.moreSearchSection.classList.add('hidden');
       } else {
-        this.lastFreeSlots = freeSlots;
-        this.lastPartialSlots = partialSlots;
-        this.renderResults(freeSlots, partialSlots, conflictsInRange);
+        this.renderInitialResults(busyPeriods, conflictsInRange);
       }
     } catch (error) {
       this.showError(error.message);
@@ -1024,13 +1049,19 @@ class CalendarAvailabilityFinder {
     // ※ 「いいえ（declined）」のみ除外。未回答（needsAction）・仮承諾（tentative）・
     //    attendeesリストにいない場合もすべてbusy扱いにする
     // また、終日予定（start.date）は対象外とし、FreeBusyのbusy期間からも除去する
+    //
+    // 重要: FreeBusy APIは隣接する予定を連結して1つのbusy期間として返す。
+    // Events APIで個別の予定が取得できた場合、FreeBusyのbusy期間を個別イベントで置き換え、
+    // 正確なイベント単位での表示を実現する。
     const allDayPeriods = []; // 終日予定のbusy期間（後でFreeBusyから除去用）
+    const eventsApiSuccessEmails = new Set(); // Events APIでアクセスできたメール
 
     for (const email of this.emails) {
       try {
         const data = await this.apiGetEvents(
           email, timeMin.toISOString(), timeMax.toISOString()
         );
+        eventsApiSuccessEmails.add(email);
         console.log(`\n[Events API] ${email}: ${data.items?.length || 0}件のイベント取得`);
         if (data.items) {
           for (const event of data.items) {
@@ -1068,36 +1099,21 @@ class CalendarAvailabilityFinder {
 
             if (!event.start?.dateTime) continue;
 
-            console.log(`  [処理] 「${event.summary}」 status=${responseStatus} start=${event.start.dateTime} end=${event.end.dateTime}`);
-
             const evTitle = event.summary || '(タイトルなし)';
             const evStart = new Date(event.start.dateTime);
             const evEnd = new Date(event.end.dateTime);
 
-            // FreeBusy で既に取得済みのbusy期間とマッチするか確認
-            let matched = false;
-            for (const ev of allEvents) {
-              if (ev.email === email && ev.source === 'freebusy') {
-                if (evStart < ev.end && evEnd > ev.start) {
-                  // タイトルを補完
-                  if (!ev.title) ev.title = evTitle;
-                  matched = true;
-                  break;
-                }
-              }
-            }
+            console.log(`  [処理] 「${evTitle}」 status=${responseStatus} start=${event.start.dateTime} end=${event.end.dateTime}`);
 
-            // FreeBusy に含まれていなかった予定を追加
-            if (!matched) {
-              console.log(`  [追加] ${email}: 「${evTitle}」${evStart.toLocaleString()} - ${evEnd.toLocaleString()} - FreeBusyに未掲載 (status: ${responseStatus})`);
-              allEvents.push({
-                email,
-                title: evTitle,
-                start: evStart,
-                end: evEnd,
-                source: 'events-api',
-              });
-            }
+            // Events APIで取得した個別イベントを直接追加
+            // （FreeBusy の連結期間は後で置き換えるので、ここでは重複チェック不要）
+            allEvents.push({
+              email,
+              title: evTitle,
+              start: evStart,
+              end: evEnd,
+              source: 'events-api',
+            });
           }
         }
       } catch (e) {
@@ -1107,26 +1123,57 @@ class CalendarAvailabilityFinder {
       }
     }
 
-    // 終日予定に「完全に包含される」FreeBusy busy期間を除去
-    // ※ 注意: FreeBusyが通常予定を連結した24h超の期間は、終日予定とは別物なので除外しない
-    // 終日予定と完全に一致（start/endが同じ）するもののみ除去
-    if (allDayPeriods.length > 0) {
+    // Events APIで個別イベントが取得できた人のFreeBusy連結期間を除去
+    // （個別イベントが正確なので、FreeBusyの連結期間は不要）
+    // Events APIでアクセスできなかった人のFreeBusy期間はそのまま残す
+    {
       const beforeCount = allEvents.length;
       for (let i = allEvents.length - 1; i >= 0; i--) {
         const ev = allEvents[i];
         if (ev.source !== 'freebusy') continue;
+
+        if (eventsApiSuccessEmails.has(ev.email)) {
+          // Events APIで取得できた人 → FreeBusy期間を除去（個別イベントで置換済み）
+          console.log(`  [FreeBusy→Events置換] ${ev.email} FreeBusy期間を除去: ${ev.start.toLocaleString()} 〜 ${ev.end.toLocaleString()}`);
+          allEvents.splice(i, 1);
+          continue;
+        }
+
+        // Events APIでアクセスできなかった人 →
+        // 1. 他人のEvents APIから取得した終日予定(allDayPeriods)に包含されるか
+        // 2. UTC midnight境界のbusy期間（= FreeBusy APIが返す終日予定の特徴）か
+        let removed = false;
+
+        // 1. 他ユーザーのEvents APIで判明した終日予定の期間に包含される場合
         for (const adp of allDayPeriods) {
-          if (ev.email !== adp.email) continue;
-          // FreeBusyのbusy期間が終日予定の範囲に完全に包含されているか
+          // 終日予定は誰のカレンダーでも共通（祝日等）なので、email問わずチェック
           if (ev.start >= adp.start && ev.end <= adp.end) {
-            console.log(`  [終日除去] FreeBusy busy期間を除去: ${ev.email} ${ev.start.toLocaleString()} 〜 ${ev.end.toLocaleString()}`);
+            console.log(`  [終日除去] FreeBusy busy期間を除去（他ユーザーの終日予定と一致）: ${ev.email} ${ev.start.toLocaleString()} 〜 ${ev.end.toLocaleString()}`);
             allEvents.splice(i, 1);
+            removed = true;
             break;
           }
         }
+        if (removed) continue;
+
+        // 2. UTC midnight境界チェック: FreeBusyが返す終日予定は
+        //    UTC 00:00:00 開始かつ UTC 00:00:00 終了で、ちょうど日数分の期間
+        //    （例: 1日の終日予定 = 24h, 2日の終日予定 = 48h）
+        const startUTC = ev.start;
+        const endUTC = ev.end;
+        const isStartMidnightUTC = startUTC.getUTCHours() === 0 && startUTC.getUTCMinutes() === 0 && startUTC.getUTCSeconds() === 0;
+        const isEndMidnightUTC = endUTC.getUTCHours() === 0 && endUTC.getUTCMinutes() === 0 && endUTC.getUTCSeconds() === 0;
+        const durationMs = endUTC.getTime() - startUTC.getTime();
+        const isExactDays = durationMs > 0 && durationMs % (24 * 60 * 60 * 1000) === 0;
+
+        if (isStartMidnightUTC && isEndMidnightUTC && isExactDays) {
+          console.log(`  [終日除去] FreeBusy busy期間を終日予定として除去（UTC midnight境界）: ${ev.email} ${ev.start.toLocaleString()} 〜 ${ev.end.toLocaleString()}`);
+          allEvents.splice(i, 1);
+        }
       }
-      if (beforeCount !== allEvents.length) {
-        console.log(`[終日除外] ${beforeCount - allEvents.length}件のFreeBusy busy期間を終日予定として除去`);
+      const removedCount = beforeCount - allEvents.length;
+      if (removedCount > 0) {
+        console.log(`[FreeBusy整理] ${removedCount}件のFreeBusy期間を除去/置換`);
       }
     }
 
@@ -1140,9 +1187,201 @@ class CalendarAvailabilityFinder {
   }
 
   // ============================================================
+  // 初回検索結果の表示
+  // free=被り0、partial=被り予定あり（各人最大1件まで）
+  // 「追加検索する」で被り件数の閾値を上げて段階的に候補を追加
+  // ============================================================
+  renderInitialResults(busyPeriods, conflictsInRange) {
+    // 全スロットを被り件数付きで計算してキャッシュ
+    this._cachedAllSlots = this.findAllSlotsWithOverlapCount(
+      this._cachedTimeMin, this._cachedTimeMax, busyPeriods
+    );
+
+    // 初回の閾値: 各参加者につき最大1件の被りまで許容
+    // （被り件数 ≤ 被り人数 = 各人最大1件）
+    const initialThreshold = this.emails.length;
+    this._currentMaxOverlap = initialThreshold;
+
+    // 閾値以下のスロットを free / partial に振り分け
+    const freeSlots = [];
+    const partialSlots = [];
+    for (const slot of this._cachedAllSlots) {
+      if (slot.overlapCount > initialThreshold) continue;
+      if (slot.conflictCount === 0) {
+        freeSlots.push(slot);
+      } else {
+        partialSlots.push(slot);
+      }
+    }
+
+    partialSlots.sort((a, b) => {
+      if (a.conflictCount !== b.conflictCount) return a.conflictCount - b.conflictCount;
+      return a.start - b.start;
+    });
+
+    this.lastFreeSlots = freeSlots;
+    this.lastPartialSlots = partialSlots;
+    this.renderResults(freeSlots, partialSlots, conflictsInRange);
+
+    // 「追加検索する」ボタンの表示/非表示
+    this.updateMoreSearchButton();
+  }
+
+  // ============================================================
+  // 追加検索する（被り件数の閾値を+1して追加候補を表示）
+  // ============================================================
+  expandSearch() {
+    const nextThreshold = this._currentMaxOverlap + 1;
+
+    // 次の閾値で新たに該当するスロットを取得
+    const additionalSlots = this._cachedAllSlots.filter(
+      (slot) => slot.overlapCount === nextThreshold
+    );
+
+    this._currentMaxOverlap = nextThreshold;
+
+    // 追加結果をセクションとして追加
+    if (additionalSlots.length > 0) {
+      this.additionalResultsSection.classList.remove('hidden');
+      this.renderAdditionalSection(additionalSlots, nextThreshold);
+    }
+
+    // ボタン更新
+    this.updateMoreSearchButton();
+  }
+
+  // 「追加検索する」ボタンの表示/非表示制御
+  updateMoreSearchButton() {
+    // キャッシュ内に現在の閾値を超えるスロットがあるかチェック
+    const hasMore = this._cachedAllSlots &&
+      this._cachedAllSlots.some((slot) => slot.overlapCount > this._currentMaxOverlap);
+
+    if (hasMore) {
+      this.moreSearchSection.classList.remove('hidden');
+      this.moreSearchLabel.textContent = '追加検索する';
+      const initialThreshold = this.emails.length;
+      if (this._currentMaxOverlap > initialThreshold) {
+        this.moreSearchHint.textContent = `現在: 被り${this._currentMaxOverlap}件までの候補を表示中`;
+      } else {
+        this.moreSearchHint.textContent = '被りが多い候補も表示します';
+      }
+    } else {
+      this.moreSearchSection.classList.add('hidden');
+    }
+  }
+
+  // 全スロットを被り件数付きで計算
+  findAllSlotsWithOverlapCount(timeMin, timeMax, busyPeriods) {
+    const allSlots = [];
+    const [startHour, startMin] = this.settings.startTime.split(':').map(Number);
+    const [endHour, endMin] = this.settings.endTime.split(':').map(Number);
+    const duration = this.settings.meetingDuration;
+    const slotStep = duration;
+    const now = new Date();
+
+    const current = new Date(timeMin);
+    const dayStart = new Date(current);
+    dayStart.setHours(startHour, startMin, 0, 0);
+
+    if (dayStart >= timeMin) {
+      current.setHours(startHour, startMin, 0, 0);
+    } else {
+      const minOfDay = current.getHours() * 60 + current.getMinutes();
+      const startMinOfDay = startHour * 60 + startMin;
+      if (minOfDay < startMinOfDay) {
+        current.setHours(startHour, startMin, 0, 0);
+      } else {
+        const elapsed = minOfDay - startMinOfDay;
+        const nextSlotOffset = Math.ceil(elapsed / slotStep) * slotStep;
+        current.setHours(startHour, startMin, 0, 0);
+        current.setMinutes(current.getMinutes() + nextSlotOffset);
+      }
+    }
+
+    const endTimeMinutes = endHour * 60 + endMin;
+    let safety = 0;
+    const maxIterations = 10000;
+
+    while (current < timeMax && safety < maxIterations) {
+      safety++;
+      const dayOfWeek = current.getDay();
+
+      if (!this.settings.activeDays.includes(dayOfWeek)) {
+        current.setDate(current.getDate() + 1);
+        current.setHours(startHour, startMin, 0, 0);
+        continue;
+      }
+
+      const currentMinOfDay = current.getHours() * 60 + current.getMinutes();
+      if (currentMinOfDay < startHour * 60 + startMin) {
+        current.setHours(startHour, startMin, 0, 0);
+        continue;
+      }
+
+      const slotStart = new Date(current);
+      const slotEnd = new Date(current);
+      slotEnd.setMinutes(slotEnd.getMinutes() + duration);
+
+      const slotEndMinutes = slotEnd.getHours() * 60 + slotEnd.getMinutes();
+      if (slotEndMinutes > endTimeMinutes || slotEnd.getDate() !== slotStart.getDate()) {
+        current.setDate(current.getDate() + 1);
+        current.setHours(startHour, startMin, 0, 0);
+        continue;
+      }
+
+      if (slotStart > now) {
+        const conflicting = busyPeriods.filter(
+          (busy) => slotStart < busy.end && slotEnd > busy.start
+        );
+        const conflictingPeople = new Set(conflicting.map((c) => c.email));
+        const conflictCount = conflictingPeople.size;
+        const overlapCount = conflicting.length; // 被り予定の合計件数
+
+        allSlots.push({
+          start: new Date(slotStart),
+          end: new Date(slotEnd),
+          conflictCount,         // 被り人数
+          overlapCount,          // 被り予定件数
+          conflictingEmails: [...conflictingPeople],
+          conflictingEvents: conflicting,
+        });
+      }
+
+      current.setMinutes(current.getMinutes() + slotStep);
+    }
+
+    return allSlots;
+  }
+
+  // 追加セクションをレンダリング
+  renderAdditionalSection(slots, overlapCount) {
+    const sectionDiv = document.createElement('div');
+    sectionDiv.className = 'additional-results-group';
+
+    const heading = document.createElement('h3');
+    heading.className = 'results-heading results-heading-additional';
+    heading.textContent = `被り予定${overlapCount}件の候補`;
+    sectionDiv.appendChild(heading);
+
+    const slotsContainer = document.createElement('div');
+    slotsContainer.className = 'slots-list';
+    slotsContainer.innerHTML = this.renderSlotCards(slots, 'additional');
+    sectionDiv.appendChild(slotsContainer);
+
+    this.additionalResultsSection.appendChild(sectionDiv);
+    this.attachSlotInteractions(slotsContainer);
+
+    // 一括操作バーが非表示なら表示する
+    this.bulkActions.classList.remove('hidden');
+    // 登録パネルも表示
+    this.registerPanel.classList.remove('hidden');
+    this.updateRegisterButton();
+  }
+
+  // ============================================================
   // ② スロット算出（曜日・期間バグ修正）
   // ============================================================
-  findAllSlots(timeMin, timeMax, busyPeriods) {
+  findAllSlots(timeMin, timeMax, busyPeriods, allowedConflicts = 0) {
     const freeSlots = [];
     const partialSlots = [];
     const [startHour, startMin] = this.settings.startTime.split(':').map(Number);
@@ -1222,12 +1461,12 @@ class CalendarAvailabilityFinder {
         const conflictingPeople = new Set(conflicting.map((c) => c.email));
         const conflictCount = conflictingPeople.size;
 
-        if (conflictCount === 0) {
+        if (conflictCount <= allowedConflicts) {
           freeSlots.push({
             start: new Date(slotStart),
             end: new Date(slotEnd),
-            conflictCount: 0,
-            conflictingEmails: [],
+            conflictCount,
+            conflictingEmails: conflictCount > 0 ? [...conflictingPeople] : [],
           });
         } else if (conflictCount < totalPeople) {
           partialSlots.push({
@@ -1460,7 +1699,7 @@ class CalendarAvailabilityFinder {
       this.partialSection.classList.remove('hidden');
       this.partialSlots.innerHTML = this.renderRecurringCards(recurringPartial, 'partial', modeLabel);
       const partialHeading = this.partialSection?.querySelector('.results-heading-partial');
-      if (partialHeading) partialHeading.textContent = `${modeLabel}ほぼ空きの候補（一部週に競合あり）`;
+      if (partialHeading) partialHeading.textContent = `${modeLabel}ほぼ空きの候補（一部週に被り予定あり）`;
     } else {
       this.partialSection.classList.add('hidden');
     }
@@ -1546,11 +1785,13 @@ class CalendarAvailabilityFinder {
   renderResults(freeSlots, partialSlots, conflictsInRange) {
     this.results.classList.remove('hidden');
 
-    // 通常モード: 見出しを元に戻す
+    // 通常モード: 見出しを設定
     const freeHeading = this.freeSection?.querySelector('.results-heading-free');
-    if (freeHeading) freeHeading.textContent = '競合なしの候補';
+    if (freeHeading) {
+      freeHeading.textContent = '被りなしの候補';
+    }
     const partialHeading = this.partialSection?.querySelector('.results-heading-partial');
-    if (partialHeading) partialHeading.textContent = '競合ありの候補（競合が少ない順）';
+    if (partialHeading) partialHeading.textContent = '被り予定ありの候補（被りが少ない順）';
 
     // 一括操作バーの表示
     if (freeSlots.length > 0 || partialSlots.length > 0) {
@@ -1564,8 +1805,8 @@ class CalendarAvailabilityFinder {
     if (freeSlots.length === 0) {
       this.freeSlots.innerHTML = `
         <div class="no-results">
-          <p>競合なしの空き時間は見つかりませんでした。</p>
-          <p style="font-size: 12px; margin-top: 4px;">下の「競合あり」セクションを確認してください。</p>
+          <p>被りなしの空き時間は見つかりませんでした。</p>
+          <p style="font-size: 12px; margin-top: 4px;">「追加検索する」ボタンで被りありの候補を表示できます。</p>
         </div>`;
     } else {
       this.freeSlots.innerHTML = this.renderSlotCards(freeSlots, 'free');
@@ -1626,9 +1867,12 @@ class CalendarAvailabilityFinder {
         const dataEnd = slot.end.toISOString();
 
         let badge = '';
-        if (type === 'partial') {
+        if (type === 'partial' || type === 'additional') {
           const names = slot.conflictingEmails.map((e) => e.split('@')[0]).join(', ');
-          badge = `<span class="slot-conflict-badge">${slot.conflictCount}人競合 (${this.escapeHtml(names)})</span>`;
+          const overlapInfo = slot.overlapCount > slot.conflictCount
+            ? `${slot.conflictCount}人被り・${slot.overlapCount}件`
+            : `${slot.conflictCount}人被り`;
+          badge = `<span class="slot-conflict-badge">${overlapInfo} (${this.escapeHtml(names)})</span>`;
         }
 
         html += `
