@@ -269,6 +269,31 @@ class CalendarAvailabilityFinder {
     this.copyCheckedBtn.addEventListener('click', () => this.copyCheckedSlots());
     // 追加検索する
     this.moreSearchBtn.addEventListener('click', () => this.expandSearch());
+    // セクション内 全選択/全解除（イベント委任）
+    this.results.addEventListener('click', (e) => {
+      const selectBtn = e.target.closest('.section-select-all');
+      const deselectBtn = e.target.closest('.section-deselect-all');
+      if (selectBtn) {
+        const targetId = selectBtn.dataset.target;
+        const container = targetId
+          ? document.getElementById(targetId)
+          : selectBtn.closest('.additional-results-group')?.querySelector('.slots-list');
+        if (container) {
+          container.querySelectorAll('.slot-checkbox').forEach((cb) => { cb.checked = true; });
+          this.onSlotCheckChange();
+        }
+      }
+      if (deselectBtn) {
+        const targetId = deselectBtn.dataset.target;
+        const container = targetId
+          ? document.getElementById(targetId)
+          : deselectBtn.closest('.additional-results-group')?.querySelector('.slots-list');
+        if (container) {
+          container.querySelectorAll('.slot-checkbox').forEach((cb) => { cb.checked = false; });
+          this.onSlotCheckChange();
+        }
+      }
+    });
   }
 
   // ============================================================
@@ -1358,10 +1383,23 @@ class CalendarAvailabilityFinder {
     const sectionDiv = document.createElement('div');
     sectionDiv.className = 'additional-results-group';
 
+    // 見出し行（見出し＋全選択/全解除）
+    const headingRow = document.createElement('div');
+    headingRow.className = 'section-heading-row';
+
     const heading = document.createElement('h3');
     heading.className = 'results-heading results-heading-additional';
     heading.textContent = `被り予定${overlapCount}件の候補`;
-    sectionDiv.appendChild(heading);
+    headingRow.appendChild(heading);
+
+    const btnsDiv = document.createElement('div');
+    btnsDiv.className = 'section-select-btns';
+    btnsDiv.innerHTML = `
+      <button class="btn btn-secondary btn-mini section-select-all">全選択</button>
+      <button class="btn btn-secondary btn-mini section-deselect-all">全解除</button>
+    `;
+    headingRow.appendChild(btnsDiv);
+    sectionDiv.appendChild(headingRow);
 
     const slotsContainer = document.createElement('div');
     slotsContainer.className = 'slots-list';

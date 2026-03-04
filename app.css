@@ -330,6 +330,29 @@ header h2 {
 /* Results */
 .results { margin-top: 16px; }
 
+/* Section heading row (heading + select buttons) */
+.section-heading-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.section-heading-row .results-heading {
+  flex: 1;
+  margin-bottom: 0;
+}
+.section-select-btns {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  margin-bottom: 12px;
+}
+.btn-mini {
+  padding: 2px 8px;
+  font-size: 11px;
+  border-radius: 6px;
+}
+
 .results-heading {
   font-size: 15px;
   font-weight: 600;
