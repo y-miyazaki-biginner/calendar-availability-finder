@@ -22,7 +22,7 @@
           <circle cx="21" cy="34" r="2" fill="#FBBC05"/>
         </svg>
       </div>
-      <h1>日程調整ツール_ver1.4.1</h1>
+      <h1>日程調整ツール_ver1.5.2</h1>
       <p class="subtitle">Googleカレンダーと連携して空き時間を検索</p>
       <button id="auth-btn" class="btn btn-primary btn-large">
         <svg width="18" height="18" viewBox="0 0 18 18" style="margin-right: 8px;">
@@ -109,7 +109,12 @@
         <div class="setting-group">
           <label>除外キーワード（予定名に含まれる場合スキップ）</label>
           <input type="text" id="exclude-keywords" class="text-input" placeholder="画面操作, 作業, 移動" value="画面操作">
-          <p class="setting-hint">カンマ区切りで複数指定可</p>
+          <p class="setting-hint">カンマ区切りで複数指定可。該当する予定を「存在しない」として扱います</p>
+        </div>
+        <div class="setting-group">
+          <label>ブロックキーワード（絶対かぶせたくない予定）</label>
+          <input type="text" id="block-keywords" class="text-input" placeholder="重要会議, 面談, 1on1">
+          <p class="setting-hint">カンマ区切りで複数指定可。該当する予定がある時間帯は候補から完全に除外します</p>
         </div>
         <div class="setting-group">
           <label>定例候補検索</label>
@@ -195,7 +200,7 @@
         <!-- 被り少セクション -->
         <div id="partial-section" class="hidden">
           <div class="section-heading-row">
-            <h3 class="results-heading results-heading-partial">被り予定ありの候補（被りが少ない順）</h3>
+            <h3 class="results-heading results-heading-partial">被り予定ありの候補</h3>
             <div class="section-select-btns">
               <button class="btn btn-secondary btn-mini section-select-all" data-target="partial-slots">全選択</button>
               <button class="btn btn-secondary btn-mini section-deselect-all" data-target="partial-slots">全解除</button>
@@ -237,7 +242,16 @@
 
         <!-- 被り予定 -->
         <div id="conflicts-section" class="conflicts-section hidden">
-          <h3>検索時間帯の被り予定</h3>
+          <div class="conflicts-header">
+            <h3>検索時間帯の被り予定</h3>
+            <button id="copy-conflicts-btn" class="btn btn-secondary btn-small btn-copy-conflicts">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+              </svg>
+              <span id="copy-conflicts-label">全員分コピー</span>
+            </button>
+          </div>
           <div id="conflicts-list" class="conflicts-list"></div>
         </div>
       </div>

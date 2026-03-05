@@ -157,12 +157,17 @@
 
     /* Conflicts */
     .conflicts-section { margin-top: 20px; padding-top: 16px; border-top: 1px solid #e8eaed; }
-    .conflicts-section h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; color: #d93025; }
-    .conflicts-list { display: flex; flex-direction: column; gap: 6px; }
-    .conflict-card { background: #fce8e6; border: 1px solid #f5c6c0; border-radius: 10px; padding: 10px 16px; }
-    .conflict-title { font-size: 14px; font-weight: 500; color: #d93025; margin-bottom: 2px; }
-    .conflict-time { font-size: 13px; color: #80868b; }
-    .person-label { font-size: 13px; font-weight: 600; margin: 8px 0 4px; color: #202124; }
+    .conflicts-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .conflicts-header h3 { font-size: 15px; font-weight: 600; color: #d93025; margin: 0; }
+    .btn-copy-conflicts { font-size: 12px; white-space: nowrap; }
+    .conflicts-list { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; }
+    .conflict-person-group { margin-bottom: 8px; }
+    .conflict-person-header { display: flex; align-items: center; justify-content: space-between; padding: 6px 0 4px; border-bottom: 2px solid #f5c6c0; margin-bottom: 6px; }
+    .conflict-person-label { font-size: 13px; font-weight: 700; color: #c5221f; padding: 0; border-bottom: none; margin-bottom: 0; }
+    .btn-copy-person { font-size: 11px; white-space: nowrap; flex-shrink: 0; }
+    .conflict-card { background: #fef7f6; border: 1px solid #f5c6c0; border-left: 3px solid #ea4335; border-radius: 8px; padding: 8px 14px; display: flex; align-items: baseline; gap: 8px; }
+    .conflict-title { font-size: 13px; font-weight: 600; color: #3c4043; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .conflict-time { font-size: 12px; color: #80868b; white-space: nowrap; flex-shrink: 0; }
 
     .footer { margin-top: 20px; text-align: center; padding-top: 12px; border-top: 1px solid #e8eaed; }
     .unique-email-counter { font-size: 11px; color: #80868b; margin-bottom: 6px; }
@@ -299,7 +304,12 @@
           <div class="setting-group">
             <label>除外キーワード（予定名に含まれる場合スキップ）</label>
             <input type="text" class="text-input" value="画面操作, 作業">
-            <p class="setting-hint">カンマ区切りで複数指定可</p>
+            <p class="setting-hint">カンマ区切りで複数指定可。該当する予定を「存在しない」として扱います</p>
+          </div>
+          <div class="setting-group">
+            <label>ブロックキーワード（絶対かぶせたくない予定）</label>
+            <input type="text" class="text-input" value="重要会議, 1on1">
+            <p class="setting-hint">カンマ区切りで複数指定可。該当する予定がある時間帯は候補から完全に除外します</p>
           </div>
           <div class="setting-group">
             <label>定例候補検索</label>
@@ -434,7 +444,7 @@
 
         <!-- 被り予定ありの候補 -->
         <div class="section-heading-row">
-          <div class="results-heading results-heading-partial">被り予定ありの候補（被りが少ない順）</div>
+          <div class="results-heading results-heading-partial">被り予定ありの候補</div>
           <div class="section-select-btns">
             <button class="btn btn-secondary btn-mini">全選択</button>
             <button class="btn btn-secondary btn-mini">全解除</button>
@@ -504,30 +514,54 @@
 
         <!-- 被り予定 -->
         <div class="conflicts-section">
-          <h3>検索時間帯の被り予定</h3>
+          <div class="conflicts-header">
+            <h3>検索時間帯の被り予定</h3>
+            <button class="btn btn-secondary btn-small btn-copy-conflicts">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/>
+              </svg>
+              全員分コピー
+            </button>
+          </div>
           <div class="conflicts-list">
-            <div class="person-label">tanaka@example.com</div>
-            <div class="conflict-card">
-              <div class="conflict-title">クライアントミーティング</div>
-              <div class="conflict-time">3/5(水) 15:00 - 16:30</div>
+            <div class="conflict-person-group">
+              <div class="conflict-person-header">
+                <div class="conflict-person-label">📅 tanaka</div>
+                <button class="btn btn-secondary btn-mini btn-copy-person">Slackコピー</button>
+              </div>
+              <div class="conflict-card">
+                <div class="conflict-title">クライアントミーティング</div>
+                <div class="conflict-time">3/5(水) 15:00 - 16:30</div>
+              </div>
             </div>
-            <div class="person-label">suzuki@example.com</div>
-            <div class="conflict-card">
-              <div class="conflict-title">チームスタンドアップ</div>
-              <div class="conflict-time">3/3(月) 12:00 - 12:30</div>
+            <div class="conflict-person-group">
+              <div class="conflict-person-header">
+                <div class="conflict-person-label">📅 suzuki</div>
+                <button class="btn btn-secondary btn-mini btn-copy-person">Slackコピー</button>
+              </div>
+              <div class="conflict-card">
+                <div class="conflict-title">チームスタンドアップ</div>
+                <div class="conflict-time">3/3(月) 12:00 - 12:30</div>
+              </div>
             </div>
-            <div class="person-label">coo@example.com</div>
-            <div class="conflict-card">
-              <div class="conflict-title">経営会議</div>
-              <div class="conflict-time">3/5(水) 14:00 - 16:00</div>
-            </div>
-            <div class="conflict-card">
-              <div class="conflict-title">投資家面談</div>
-              <div class="conflict-time">3/5(水) 15:00 - 17:00</div>
-            </div>
-            <div class="conflict-card">
-              <div class="conflict-title">1on1</div>
-              <div class="conflict-time">3/6(木) 11:00 - 12:00</div>
+            <div class="conflict-person-group">
+              <div class="conflict-person-header">
+                <div class="conflict-person-label">📅 coo</div>
+                <button class="btn btn-secondary btn-mini btn-copy-person">Slackコピー</button>
+              </div>
+              <div class="conflict-card">
+                <div class="conflict-title">経営会議</div>
+                <div class="conflict-time">3/5(水) 14:00 - 16:00</div>
+              </div>
+              <div class="conflict-card">
+                <div class="conflict-title">投資家面談</div>
+                <div class="conflict-time">3/5(水) 15:00 - 17:00</div>
+              </div>
+              <div class="conflict-card">
+                <div class="conflict-title">1on1</div>
+                <div class="conflict-time">3/6(木) 11:00 - 12:00</div>
+              </div>
             </div>
           </div>
         </div>
@@ -609,7 +643,7 @@
 
         <!-- 被り予定ありの候補（初回のまま変化なし） -->
         <div class="section-heading-row">
-          <div class="results-heading results-heading-partial">被り予定ありの候補（被りが少ない順）</div>
+          <div class="results-heading results-heading-partial">被り予定ありの候補</div>
           <div class="section-select-btns">
             <button class="btn btn-secondary btn-mini">全選択</button>
             <button class="btn btn-secondary btn-mini">全解除</button>
@@ -671,7 +705,13 @@
         </div>
 
         <div class="additional-results-group">
-          <div class="results-heading results-heading-additional">被り予定5件の候補</div>
+          <div class="section-heading-row">
+            <div class="results-heading results-heading-additional">被り予定5件の候補</div>
+            <div class="section-select-btns">
+              <button class="btn btn-secondary btn-mini">全選択</button>
+              <button class="btn btn-secondary btn-mini">全解除</button>
+            </div>
+          </div>
           <div class="slots-list">
             <div class="slot-date">3/5(水)</div>
             <div class="slot-card slot-card-additional">
@@ -698,6 +738,21 @@
             <span>追加検索する</span>
           </button>
           <p class="setting-hint" style="text-align: center; margin-top: 6px;">現在: 被り5件までの候補を表示中</p>
+        </div>
+
+        <!-- 登録パネル（追加検索の後に配置） -->
+        <div class="register-panel">
+          <h3 class="register-heading">選択した日程をGoogleカレンダーに登録</h3>
+          <div class="register-input-group">
+            <label>予定の名前</label>
+            <input type="text" class="text-input" placeholder="例: 定例ミーティング">
+          </div>
+          <button class="btn btn-success btn-large" disabled>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 8px;">
+              <path d="M12 5v14M5 12h14" stroke-linecap="round"/>
+            </svg>
+            選択した日程をカレンダーに登録
+          </button>
         </div>
 
         <div class="footer">

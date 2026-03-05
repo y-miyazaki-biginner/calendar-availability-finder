@@ -24,6 +24,7 @@ class CalendarAvailabilityFinder {
       meetingDuration: 30,
       activeDays: [1, 2, 3, 4, 5],
       excludeKeywords: ['画面操作'],
+      blockKeywords: [],       // 絶対かぶせたくない予定のキーワード
       recurringMode: 'off',    // 'off', 'weekly', 'biweekly'
       recurringWeeks: 4,       // 何週間分チェックするか
     };
@@ -179,6 +180,7 @@ class CalendarAvailabilityFinder {
     this.timeEnd = document.getElementById('time-end');
     this.meetingDuration = document.getElementById('meeting-duration');
     this.excludeKeywords = document.getElementById('exclude-keywords');
+    this.blockKeywords = document.getElementById('block-keywords');
     this.saveSettingsBtn = document.getElementById('save-settings');
     this.emailInput = document.getElementById('email-input');
     this.addEmailBtn = document.getElementById('add-email-btn');
@@ -192,6 +194,8 @@ class CalendarAvailabilityFinder {
     this.partialSlots = document.getElementById('partial-slots');
     this.conflictsSection = document.getElementById('conflicts-section');
     this.conflictsList = document.getElementById('conflicts-list');
+    this.copyConflictsBtn = document.getElementById('copy-conflicts-btn');
+    this.copyConflictsLabel = document.getElementById('copy-conflicts-label');
     this.registerPanel = document.getElementById('register-panel');
     this.eventTitle = document.getElementById('event-title');
     this.registerBtn = document.getElementById('register-btn');
@@ -267,6 +271,7 @@ class CalendarAvailabilityFinder {
     this.selectAllBtn.addEventListener('click', () => this.selectAllSlots());
     this.deselectAllBtn.addEventListener('click', () => this.deselectAllSlots());
     this.copyCheckedBtn.addEventListener('click', () => this.copyCheckedSlots());
+    this.copyConflictsBtn.addEventListener('click', () => this.copyConflictsForSlack());
     // 追加検索する
     this.moreSearchBtn.addEventListener('click', () => this.expandSearch());
     // セクション内 全選択/全解除（イベント委任）
@@ -280,7 +285,7 @@ class CalendarAvailabilityFinder {
           : selectBtn.closest('.additional-results-group')?.querySelector('.slots-list');
         if (container) {
           container.querySelectorAll('.slot-checkbox').forEach((cb) => { cb.checked = true; });
-          this.onSlotCheckChange();
+          this.onSlotCheckChanged();
         }
       }
       if (deselectBtn) {
@@ -290,7 +295,7 @@ class CalendarAvailabilityFinder {
           : deselectBtn.closest('.additional-results-group')?.querySelector('.slots-list');
         if (container) {
           container.querySelectorAll('.slot-checkbox').forEach((cb) => { cb.checked = false; });
-          this.onSlotCheckChange();
+          this.onSlotCheckChanged();
         }
       }
     });
@@ -355,6 +360,12 @@ class CalendarAvailabilityFinder {
       .map((k) => k.trim())
       .filter(Boolean);
 
+    const rawBlockKw = this.blockKeywords.value;
+    this.settings.blockKeywords = rawBlockKw
+      .split(/[,、，]/)
+      .map((k) => k.trim())
+      .filter(Boolean);
+
     const dayCheckboxes = document.querySelectorAll('.day-check input');
     this.settings.activeDays = [];
     dayCheckboxes.forEach((cb) => {
@@ -381,6 +392,7 @@ class CalendarAvailabilityFinder {
     this.timeEnd.value = this.settings.endTime;
     this.meetingDuration.value = this.settings.meetingDuration;
     this.excludeKeywords.value = (this.settings.excludeKeywords || []).join(', ');
+    this.blockKeywords.value = (this.settings.blockKeywords || []).join(', ');
 
     // 日付指定のデフォルト値を設定
     if (!this.settings.dateStart) {
@@ -782,6 +794,15 @@ class CalendarAvailabilityFinder {
     return keywords.some((kw) => kw && lowerTitle.includes(kw.toLowerCase()));
   }
 
+  // ブロックキーワードに一致するかチェック（絶対かぶせたくない予定）
+  isBlockKeywordEvent(title) {
+    if (!title) return false;
+    const keywords = this.settings.blockKeywords || [];
+    if (keywords.length === 0) return false;
+    const lowerTitle = title.toLowerCase();
+    return keywords.some((kw) => kw && lowerTitle.includes(kw.toLowerCase()));
+  }
+
   // ============================================================
   // 検索時間帯内かどうか判定
   // イベントの時間帯が検索設定の時間帯と重なっているか確認
@@ -830,20 +851,40 @@ class CalendarAvailabilityFinder {
   }
 
   async apiGetEvents(calendarId, timeMin, timeMax) {
-    const params = new URLSearchParams({
-      timeMin, timeMax,
-      singleEvents: 'true',
-      orderBy: 'startTime',
-      maxResults: '250',
-    });
-    const res = await this.fetchWithAuth(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${params}`
-    );
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.error?.message || `API error: ${res.status}`);
-    }
-    return res.json();
+    // ページネーション対応: maxResults=2500でも足りない場合に次ページを取得
+    let allItems = [];
+    let pageToken = null;
+    let pageCount = 0;
+
+    do {
+      const params = new URLSearchParams({
+        timeMin, timeMax,
+        singleEvents: 'true',
+        orderBy: 'startTime',
+        maxResults: '2500',
+      });
+      if (pageToken) {
+        params.set('pageToken', pageToken);
+      }
+      const res = await this.fetchWithAuth(
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${params}`
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error?.message || `API error: ${res.status}`);
+      }
+      const data = await res.json();
+      if (data.items) {
+        allItems = allItems.concat(data.items);
+      }
+      pageToken = data.nextPageToken || null;
+      pageCount++;
+      if (pageToken) {
+        console.log(`[Events API] ${calendarId}: ページ${pageCount}完了 (${allItems.length}件), 次ページあり`);
+      }
+    } while (pageToken && pageCount < 10); // 安全のため最大10ページ
+
+    return { items: allItems };
   }
 
   async apiInsertEvent(eventBody) {
@@ -931,6 +972,12 @@ class CalendarAvailabilityFinder {
       .map((k) => k.trim())
       .filter(Boolean);
 
+    const rawBlockKw = this.blockKeywords.value;
+    this.settings.blockKeywords = rawBlockKw
+      .split(/[,、，]/)
+      .map((k) => k.trim())
+      .filter(Boolean);
+
     const dayCheckboxes = document.querySelectorAll('.day-check input');
     this.settings.activeDays = [];
     dayCheckboxes.forEach((cb) => {
@@ -981,12 +1028,14 @@ class CalendarAvailabilityFinder {
         email: ev.email,
         start: ev.start,
         end: ev.end,
+        title: ev.title || '',
       }));
 
       const conflictsInRange = filteredEvents.filter((ev) =>
         ev.start < timeMax && ev.end > timeMin &&          // 検索日付範囲内
         this.settings.activeDays.includes(ev.start.getDay()) && // 対象曜日
-        this.isWithinSearchTimeRange(ev.start, ev.end)     // 検索時間帯内
+        this.isWithinSearchTimeRange(ev.start, ev.end) &&  // 検索時間帯内
+        !this.isBlockKeywordEvent(ev.title)                // ブロックキーワード除外
       );
 
       // キャッシュ保存（「追加検索する」で再利用）
@@ -1029,6 +1078,7 @@ class CalendarAvailabilityFinder {
     console.log(`  検索時間帯: ${this.settings.startTime} 〜 ${this.settings.endTime}`);
     console.log(`  対象メール: ${this.emails.join(', ')}`);
     console.log(`  除外キーワード: ${(this.settings.excludeKeywords || []).join(', ') || '(なし)'}`);
+    console.log(`  ブロックキーワード: ${(this.settings.blockKeywords || []).join(', ') || '(なし)'}`);
     console.log(`========================================\n`);
 
     // FreeBusy API をメインに使う
@@ -1239,10 +1289,9 @@ class CalendarAvailabilityFinder {
       }
     }
 
-    partialSlots.sort((a, b) => {
-      if (a.conflictCount !== b.conflictCount) return a.conflictCount - b.conflictCount;
-      return a.start - b.start;
-    });
+    // 各セクション内は時系列でソート
+    freeSlots.sort((a, b) => a.start - b.start);
+    partialSlots.sort((a, b) => a.start - b.start);
 
     this.lastFreeSlots = freeSlots;
     this.lastPartialSlots = partialSlots;
@@ -1258,10 +1307,10 @@ class CalendarAvailabilityFinder {
   expandSearch() {
     const nextThreshold = this._currentMaxOverlap + 1;
 
-    // 次の閾値で新たに該当するスロットを取得
-    const additionalSlots = this._cachedAllSlots.filter(
-      (slot) => slot.overlapCount === nextThreshold
-    );
+    // 次の閾値で新たに該当するスロットを取得（時系列ソート）
+    const additionalSlots = this._cachedAllSlots
+      .filter((slot) => slot.overlapCount === nextThreshold)
+      .sort((a, b) => a.start - b.start);
 
     this._currentMaxOverlap = nextThreshold;
 
@@ -1358,6 +1407,14 @@ class CalendarAvailabilityFinder {
         const conflicting = busyPeriods.filter(
           (busy) => slotStart < busy.end && slotEnd > busy.start
         );
+
+        // ブロックキーワード: 該当する予定があるスロットは完全に除外
+        const hasBlockEvent = conflicting.some((c) => this.isBlockKeywordEvent(c.title));
+        if (hasBlockEvent) {
+          current.setMinutes(current.getMinutes() + slotStep);
+          continue;
+        }
+
         const conflictingPeople = new Set(conflicting.map((c) => c.email));
         const conflictCount = conflictingPeople.size;
         const overlapCount = conflicting.length; // 被り予定の合計件数
@@ -1496,6 +1553,13 @@ class CalendarAvailabilityFinder {
           (busy) => slotStart < busy.end && slotEnd > busy.start
         );
 
+        // ブロックキーワード: 該当する予定があるスロットは完全に除外
+        const hasBlockEvent = conflicting.some((c) => this.isBlockKeywordEvent(c.title));
+        if (hasBlockEvent) {
+          current.setMinutes(current.getMinutes() + slotStep);
+          continue;
+        }
+
         const conflictingPeople = new Set(conflicting.map((c) => c.email));
         const conflictCount = conflictingPeople.size;
 
@@ -1520,10 +1584,9 @@ class CalendarAvailabilityFinder {
       current.setMinutes(current.getMinutes() + slotStep);
     }
 
-    partialSlots.sort((a, b) => {
-      if (a.conflictCount !== b.conflictCount) return a.conflictCount - b.conflictCount;
-      return a.start - b.start;
-    });
+    // 各セクション内は時系列でソート
+    freeSlots.sort((a, b) => a.start - b.start);
+    partialSlots.sort((a, b) => a.start - b.start);
 
     return { freeSlots, partialSlots };
   }
@@ -1743,28 +1806,7 @@ class CalendarAvailabilityFinder {
     }
 
     // 競合する予定
-    if (conflictsInRange.length > 0) {
-      this.conflictsSection.classList.remove('hidden');
-      const byPerson = {};
-      for (const c of conflictsInRange) {
-        if (!byPerson[c.email]) byPerson[c.email] = [];
-        byPerson[c.email].push(c);
-      }
-      let html = '';
-      for (const [email, events] of Object.entries(byPerson)) {
-        html += `<div style="font-size: 13px; font-weight: 600; margin: 8px 0 4px; color: #202124;">${this.escapeHtml(email)}</div>`;
-        for (const event of events) {
-          html += `
-            <div class="conflict-card">
-              <div class="conflict-title">${this.escapeHtml(event.title)}</div>
-              <div class="conflict-time">${this.formatDate(event.start)} ${this.formatTimeRange(event.start, event.end)}</div>
-            </div>`;
-        }
-      }
-      this.conflictsList.innerHTML = html;
-    } else {
-      this.conflictsSection.classList.add('hidden');
-    }
+    this.renderConflicts(conflictsInRange);
   }
 
   renderRecurringCards(items, type, modeLabel) {
@@ -1829,7 +1871,7 @@ class CalendarAvailabilityFinder {
       freeHeading.textContent = '被りなしの候補';
     }
     const partialHeading = this.partialSection?.querySelector('.results-heading-partial');
-    if (partialHeading) partialHeading.textContent = '被り予定ありの候補（被りが少ない順）';
+    if (partialHeading) partialHeading.textContent = '被り予定ありの候補';
 
     // 一括操作バーの表示
     if (freeSlots.length > 0 || partialSlots.length > 0) {
@@ -1864,30 +1906,107 @@ class CalendarAvailabilityFinder {
       this.updateRegisterButton();
     }
 
-    if (conflictsInRange.length > 0) {
-      this.conflictsSection.classList.remove('hidden');
+    this.renderConflicts(conflictsInRange);
+  }
 
-      const byPerson = {};
-      for (const c of conflictsInRange) {
-        if (!byPerson[c.email]) byPerson[c.email] = [];
-        byPerson[c.email].push(c);
-      }
+  // メールアドレスから表示名を取得（@の前を使用）
+  getDisplayName(email) {
+    // @の前を取得し、ドットやハイフンをスペースに変換して読みやすく
+    const localPart = email.split('@')[0];
+    return localPart;
+  }
 
-      let html = '';
-      for (const [email, events] of Object.entries(byPerson)) {
-        html += `<div style="font-size: 13px; font-weight: 600; margin: 8px 0 4px; color: #202124;">${this.escapeHtml(email)}</div>`;
-        for (const event of events) {
-          html += `
-            <div class="conflict-card">
-              <div class="conflict-title">${this.escapeHtml(event.title)}</div>
-              <div class="conflict-time">${this.formatDate(event.start)} ${this.formatTimeRange(event.start, event.end)}</div>
-            </div>`;
-        }
-      }
-      this.conflictsList.innerHTML = html;
-    } else {
+  // ============================================================
+  // 被り予定セクション (名前表示 + Slackコピー対応)
+  // ============================================================
+  renderConflicts(conflictsInRange) {
+    if (conflictsInRange.length === 0) {
       this.conflictsSection.classList.add('hidden');
+      this._lastConflictsData = null;
+      return;
     }
+
+    this.conflictsSection.classList.remove('hidden');
+
+    // メール毎にグループ化し、各グループ内は時系列ソート
+    const byPerson = {};
+    for (const c of conflictsInRange) {
+      if (!byPerson[c.email]) byPerson[c.email] = [];
+      byPerson[c.email].push(c);
+    }
+    for (const events of Object.values(byPerson)) {
+      events.sort((a, b) => a.start - b.start);
+    }
+
+    // Slackコピー用にデータを保持
+    this._lastConflictsData = byPerson;
+
+    let html = '';
+    for (const [email, events] of Object.entries(byPerson)) {
+      const name = this.getDisplayName(email);
+      html += `<div class="conflict-person-group">`;
+      html += `<div class="conflict-person-header">`;
+      html += `<div class="conflict-person-label">📅 ${this.escapeHtml(name)}</div>`;
+      html += `<button class="btn btn-secondary btn-mini btn-copy-person" data-email="${this.escapeHtml(email)}">Slackコピー</button>`;
+      html += `</div>`;
+      for (const event of events) {
+        html += `
+          <div class="conflict-card">
+            <div class="conflict-title">${this.escapeHtml(event.title)}</div>
+            <div class="conflict-time">${this.formatDate(event.start)} ${this.formatTimeRange(event.start, event.end)}</div>
+          </div>`;
+      }
+      html += `</div>`;
+    }
+    this.conflictsList.innerHTML = html;
+
+    // 個人ごとのSlackコピーボタン（イベント委任）
+    this.conflictsList.querySelectorAll('.btn-copy-person').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const email = btn.dataset.email;
+        this.copyPersonConflictsForSlack(email, btn);
+      });
+    });
+  }
+
+  // 特定の人のSlack用コピー
+  copyPersonConflictsForSlack(email, btn) {
+    if (!this._lastConflictsData || !this._lastConflictsData[email]) return;
+    const events = this._lastConflictsData[email];
+    const name = this.getDisplayName(email);
+
+    let text = `@${name}\n`;
+    for (const event of events) {
+      const dateTime = `${this.formatDate(event.start)} ${this.formatTimeRange(event.start, event.end)}`;
+      text += `\`\`\`\n${event.title}\n${dateTime}\n\`\`\`\n`;
+    }
+
+    navigator.clipboard.writeText(text.trim());
+    const orig = btn.textContent;
+    btn.textContent = 'コピー済み!';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  }
+
+  // 全員分のSlack用コピー
+  copyConflictsForSlack() {
+    if (!this._lastConflictsData) return;
+
+    let text = '';
+    for (const [email, events] of Object.entries(this._lastConflictsData)) {
+      const name = this.getDisplayName(email);
+      text += `@${name}\n`;
+      for (const event of events) {
+        const dateTime = `${this.formatDate(event.start)} ${this.formatTimeRange(event.start, event.end)}`;
+        text += `\`\`\`\n${event.title}\n${dateTime}\n\`\`\`\n`;
+      }
+      text += '\n';
+    }
+
+    navigator.clipboard.writeText(text.trim());
+    this.copyConflictsLabel.textContent = 'コピーしました!';
+    setTimeout(() => {
+      this.copyConflictsLabel.textContent = '全員分コピー';
+    }, 1500);
   }
 
   renderSlotCards(slots, type) {
