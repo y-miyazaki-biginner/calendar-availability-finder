@@ -103,8 +103,13 @@
       font-size: 12px; color: #3c4043; cursor: pointer; transition: all 0.2s;
     }
     .group-tag:hover { background: #e8f0fe; border-color: #4285F4; color: #1a73e8; }
+    .group-tag .group-edit { font-size: 13px; color: #80868b; margin-left: 2px; }
+    .group-tag .group-edit:hover { color: #4285F4; }
     .group-tag .group-delete { font-size: 14px; color: #80868b; margin-left: 2px; }
+    .group-tag .group-delete:hover { color: #d93025; }
     .email-actions { margin-top: 8px; display: flex; gap: 6px; }
+    .btn-clear-emails { color: #d93025; }
+    .btn-clear-emails:hover { background: #fce8e6; color: #a50e0e; }
 
     /* Bulk Actions */
     .bulk-actions {
@@ -166,8 +171,11 @@
     .conflict-person-label { font-size: 13px; font-weight: 700; color: #c5221f; padding: 0; border-bottom: none; margin-bottom: 0; }
     .btn-copy-person { font-size: 11px; white-space: nowrap; flex-shrink: 0; }
     .conflict-card { background: #fef7f6; border: 1px solid #f5c6c0; border-left: 3px solid #ea4335; border-radius: 8px; padding: 8px 14px; display: flex; align-items: baseline; gap: 8px; }
+    .conflict-checkbox { width: 16px; height: 16px; accent-color: #d93025; cursor: pointer; flex-shrink: 0; }
+    .conflict-card.checked { background: #fce8e6; border-color: #d93025; }
     .conflict-title { font-size: 13px; font-weight: 600; color: #3c4043; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .conflict-time { font-size: 12px; color: #80868b; white-space: nowrap; flex-shrink: 0; }
+    .conflicts-block-actions { margin-top: 10px; text-align: right; }
 
     .footer { margin-top: 20px; text-align: center; padding-top: 12px; border-top: 1px solid #e8eaed; }
     .unique-email-counter { font-size: 11px; color: #80868b; margin-bottom: 6px; }
@@ -202,6 +210,12 @@
       background: #e6f4ea; border: 1px solid #ceead6; border-radius: 8px;
       padding: 12px 16px; color: #1b7e4b; font-size: 13px; font-weight: 500; margin-top: 14px;
     }
+    .btn-copy-registered {
+      display: block; width: 100%; margin-top: 8px; padding: 10px 16px;
+      background: #e8f0fe; color: #1a73e8; border: 1px solid #c2d7f5;
+      border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer;
+    }
+    .btn-copy-registered:hover { background: #d2e3fc; }
 
     /* Additional Results Group */
     .additional-results-group { margin-top: 16px; }
@@ -246,15 +260,14 @@
 
   <!-- ===== Screen 2: Settings + Email Input ===== -->
   <div class="mock-container">
-    <div class="mock-label">2. 設定 + メール入力（サジェスト＋グループ）</div>
+    <div class="mock-label">2. 設定 + メール入力（グループ管理）</div>
     <div class="frame">
       <div class="section">
         <header>
           <h2>空き時間検索</h2>
           <button class="btn btn-settings">
-            <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" style="margin-right: 4px;">
-              <path d="M10 13a3 3 0 100-6 3 3 0 000 6z"/>
-              <path fill-rule="evenodd" d="M9.99 1.003A1 1 0 0111 2v.382a7.03 7.03 0 011.86.773l.27-.27a1 1 0 011.414 1.414l-.27.27A7.03 7.03 0 0115.046 6.5H15.5a1 1 0 110 2h-.454a7.03 7.03 0 01-.773 1.86l.27.27a1 1 0 01-1.414 1.414l-.27-.27a7.03 7.03 0 01-1.86.773V13a1 1 0 11-2 0v-.454a7.03 7.03 0 01-1.86-.773l-.27.27a1 1 0 01-1.414-1.414l.27-.27A7.03 7.03 0 014.954 8.5H4.5a1 1 0 010-2h.454a7.03 7.03 0 01.773-1.86l-.27-.27A1 1 0 016.87 2.956l.27.27A7.03 7.03 0 019 2.382V2a1 1 0 01.99-.997z"/>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;">
+              <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 00-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1112 8.4a3.6 3.6 0 010 7.2z"/>
             </svg>
             設定
           </button>
@@ -319,26 +332,12 @@
           <button class="btn btn-secondary" style="width:100%;">設定を保存</button>
         </div>
 
-        <!-- メール入力（サジェスト表示中） -->
+        <!-- メール入力 -->
         <div class="input-section">
           <label>参加者のメールアドレス（名前でも検索可）</label>
           <div class="email-input-row">
             <div class="email-input-wrapper">
-              <input type="text" value="田中" placeholder="名前 or メールアドレス">
-              <div class="email-suggestions">
-                <div class="suggestion-item highlighted">
-                  <div class="suggestion-name">田中 太郎</div>
-                  <div class="suggestion-email">tanaka.taro@example.com</div>
-                </div>
-                <div class="suggestion-item">
-                  <div class="suggestion-name">田中 花子</div>
-                  <div class="suggestion-email">tanaka.hanako@example.com</div>
-                </div>
-                <div class="suggestion-item">
-                  <div class="suggestion-name">田中 一郎</div>
-                  <div class="suggestion-email">tanaka.ichiro@company.co.jp</div>
-                </div>
-              </div>
+              <input type="text" value="" placeholder="名前 or メールアドレス">
             </div>
             <button class="btn btn-primary">追加</button>
           </div>
@@ -348,11 +347,12 @@
             <span class="email-tag">coo@example.com <span class="remove-email">&times;</span></span>
           </div>
           <div class="saved-groups">
-            <span class="group-tag">開発チーム (4人) <span class="group-delete">&times;</span></span>
-            <span class="group-tag">営業部 (3人) <span class="group-delete">&times;</span></span>
+            <span class="group-tag">開発チーム (4人) <span class="group-edit">✎</span> <span class="group-delete">&times;</span></span>
+            <span class="group-tag">営業部 (3人) <span class="group-edit">✎</span> <span class="group-delete">&times;</span></span>
           </div>
           <div class="email-actions">
             <button class="btn btn-secondary btn-small">グループ保存</button>
+            <button class="btn btn-secondary btn-small btn-clear-emails">全削除</button>
           </div>
         </div>
 
@@ -373,9 +373,8 @@
         <header>
           <h2>空き時間検索</h2>
           <button class="btn btn-settings">
-            <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" style="margin-right: 4px;">
-              <path d="M10 13a3 3 0 100-6 3 3 0 000 6z"/>
-              <path fill-rule="evenodd" d="M9.99 1.003A1 1 0 0111 2v.382a7.03 7.03 0 011.86.773l.27-.27a1 1 0 011.414 1.414l-.27.27A7.03 7.03 0 0115.046 6.5H15.5a1 1 0 110 2h-.454a7.03 7.03 0 01-.773 1.86l.27.27a1 1 0 01-1.414 1.414l-.27-.27a7.03 7.03 0 01-1.86.773V13a1 1 0 11-2 0v-.454a7.03 7.03 0 01-1.86-.773l-.27.27a1 1 0 01-1.414-1.414l.27-.27A7.03 7.03 0 014.954 8.5H4.5a1 1 0 010-2h.454a7.03 7.03 0 01.773-1.86l-.27-.27A1 1 0 016.87 2.956l.27.27A7.03 7.03 0 019 2.382V2a1 1 0 01.99-.997z"/>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;">
+              <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 00-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1112 8.4a3.6 3.6 0 010 7.2z"/>
             </svg>
             設定
           </button>
@@ -531,6 +530,7 @@
                 <button class="btn btn-secondary btn-mini btn-copy-person">Slackコピー</button>
               </div>
               <div class="conflict-card">
+                <input type="checkbox" class="conflict-checkbox">
                 <div class="conflict-title">クライアントミーティング</div>
                 <div class="conflict-time">3/5(水) 15:00 - 16:30</div>
               </div>
@@ -541,6 +541,7 @@
                 <button class="btn btn-secondary btn-mini btn-copy-person">Slackコピー</button>
               </div>
               <div class="conflict-card">
+                <input type="checkbox" class="conflict-checkbox">
                 <div class="conflict-title">チームスタンドアップ</div>
                 <div class="conflict-time">3/3(月) 12:00 - 12:30</div>
               </div>
@@ -550,19 +551,30 @@
                 <div class="conflict-person-label">📅 coo</div>
                 <button class="btn btn-secondary btn-mini btn-copy-person">Slackコピー</button>
               </div>
-              <div class="conflict-card">
+              <div class="conflict-card checked">
+                <input type="checkbox" class="conflict-checkbox" checked>
                 <div class="conflict-title">経営会議</div>
                 <div class="conflict-time">3/5(水) 14:00 - 16:00</div>
               </div>
-              <div class="conflict-card">
+              <div class="conflict-card checked">
+                <input type="checkbox" class="conflict-checkbox" checked>
                 <div class="conflict-title">投資家面談</div>
                 <div class="conflict-time">3/5(水) 15:00 - 17:00</div>
               </div>
               <div class="conflict-card">
+                <input type="checkbox" class="conflict-checkbox">
                 <div class="conflict-title">1on1</div>
                 <div class="conflict-time">3/6(木) 11:00 - 12:00</div>
               </div>
             </div>
+          </div>
+          <div class="conflicts-block-actions">
+            <button class="btn btn-primary btn-small">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+                <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+              </svg>
+              チェックした予定(2件)をブロックして再検索
+            </button>
           </div>
         </div>
 
@@ -588,9 +600,8 @@
         <header>
           <h2>空き時間検索</h2>
           <button class="btn btn-settings">
-            <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" style="margin-right: 4px;">
-              <path d="M10 13a3 3 0 100-6 3 3 0 000 6z"/>
-              <path fill-rule="evenodd" d="M9.99 1.003A1 1 0 0111 2v.382a7.03 7.03 0 011.86.773l.27-.27a1 1 0 011.414 1.414l-.27.27A7.03 7.03 0 0115.046 6.5H15.5a1 1 0 110 2h-.454a7.03 7.03 0 01-.773 1.86l.27.27a1 1 0 01-1.414 1.414l-.27-.27a7.03 7.03 0 01-1.86.773V13a1 1 0 11-2 0v-.454a7.03 7.03 0 01-1.86-.773l-.27.27a1 1 0 01-1.414-1.414l.27-.27A7.03 7.03 0 014.954 8.5H4.5a1 1 0 010-2h.454a7.03 7.03 0 01.773-1.86l-.27-.27A1 1 0 016.87 2.956l.27.27A7.03 7.03 0 019 2.382V2a1 1 0 01.99-.997z"/>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;">
+              <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 00-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1112 8.4a3.6 3.6 0 010 7.2z"/>
             </svg>
             設定
           </button>
@@ -771,9 +782,8 @@
         <header>
           <h2>空き時間検索</h2>
           <button class="btn btn-settings">
-            <svg width="16" height="16" viewBox="0 0 20 20" fill="currentColor" style="margin-right: 4px;">
-              <path d="M10 13a3 3 0 100-6 3 3 0 000 6z"/>
-              <path fill-rule="evenodd" d="M9.99 1.003A1 1 0 0111 2v.382a7.03 7.03 0 011.86.773l.27-.27a1 1 0 011.414 1.414l-.27.27A7.03 7.03 0 0115.046 6.5H15.5a1 1 0 110 2h-.454a7.03 7.03 0 01-.773 1.86l.27.27a1 1 0 01-1.414 1.414l-.27-.27a7.03 7.03 0 01-1.86.773V13a1 1 0 11-2 0v-.454a7.03 7.03 0 01-1.86-.773l-.27.27a1 1 0 01-1.414-1.414l.27-.27A7.03 7.03 0 014.954 8.5H4.5a1 1 0 010-2h.454a7.03 7.03 0 01.773-1.86l-.27-.27A1 1 0 016.87 2.956l.27.27A7.03 7.03 0 019 2.382V2a1 1 0 01.99-.997z"/>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" style="margin-right: 6px;">
+              <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.49.49 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 00-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1112 8.4a3.6 3.6 0 010 7.2z"/>
             </svg>
             設定
           </button>
@@ -794,6 +804,7 @@
           <div class="register-success">
             &#x2705; 3件の予定を登録しました！
           </div>
+          <button class="btn btn-copy-registered">📋 登録した日程をコピー</button>
         </div>
 
         <div class="footer">

@@ -196,6 +196,8 @@ class CalendarAvailabilityFinder {
     this.conflictsList = document.getElementById('conflicts-list');
     this.copyConflictsBtn = document.getElementById('copy-conflicts-btn');
     this.copyConflictsLabel = document.getElementById('copy-conflicts-label');
+    this.conflictsBlockActions = document.getElementById('conflicts-block-actions');
+    this.blockAndResearchBtn = document.getElementById('block-and-research-btn');
     this.registerPanel = document.getElementById('register-panel');
     this.eventTitle = document.getElementById('event-title');
     this.registerBtn = document.getElementById('register-btn');
@@ -204,6 +206,7 @@ class CalendarAvailabilityFinder {
     // メールアドレス保存
     this.savedGroupsContainer = document.getElementById('saved-groups');
     this.saveGroupBtn = document.getElementById('save-group-btn');
+    this.clearEmailsBtn = document.getElementById('clear-emails-btn');
     this.emailHistoryList = document.getElementById('email-history-list');
     this.emailSuggestions = document.getElementById('email-suggestions');
     // 一括操作
@@ -261,8 +264,9 @@ class CalendarAvailabilityFinder {
     this.eventTitle.addEventListener('input', () => this.updateRegisterButton());
     // 範囲モード切替
     this.rangeMode.addEventListener('change', () => this.onRangeModeChange());
-    // グループ保存
+    // グループ保存 & 一括削除
     this.saveGroupBtn.addEventListener('click', () => this.saveCurrentGroup());
+    this.clearEmailsBtn.addEventListener('click', () => this.clearAllEmails());
     // 定例検索モード切替
     if (this.recurringMode) {
       this.recurringMode.addEventListener('change', () => this.onRecurringModeChange());
@@ -272,6 +276,7 @@ class CalendarAvailabilityFinder {
     this.deselectAllBtn.addEventListener('click', () => this.deselectAllSlots());
     this.copyCheckedBtn.addEventListener('click', () => this.copyCheckedSlots());
     this.copyConflictsBtn.addEventListener('click', () => this.copyConflictsForSlack());
+    this.blockAndResearchBtn.addEventListener('click', () => this.blockCheckedAndResearch());
     // 追加検索する
     this.moreSearchBtn.addEventListener('click', () => this.expandSearch());
     // セクション内 全選択/全解除（イベント委任）
@@ -478,6 +483,13 @@ class CalendarAvailabilityFinder {
 
   removeEmail(email) {
     this.emails = this.emails.filter((e) => e !== email);
+    this.renderEmailTags();
+    this.updateSearchButton();
+  }
+
+  clearAllEmails() {
+    if (this.emails.length === 0) return;
+    this.emails = [];
     this.renderEmailTags();
     this.updateSearchButton();
   }
@@ -738,6 +750,22 @@ class CalendarAvailabilityFinder {
     this.updateUniqueEmailCounter();
   }
 
+  editGroup(index, e) {
+    e.stopPropagation();
+    if (this.emails.length === 0) {
+      alert('メンバーが追加されていません');
+      return;
+    }
+    const group = this.savedGroups[index];
+    if (!group) return;
+    const name = prompt('グループ名を編集:', group.name);
+    if (!name) return;
+    this.savedGroups[index] = { name, emails: [...this.emails] };
+    localStorage.setItem('emailGroups', JSON.stringify(this.savedGroups));
+    this.renderSavedGroups();
+    this.updateUniqueEmailCounter();
+  }
+
   renderSavedGroups() {
     if (this.savedGroups.length === 0) {
       this.savedGroupsContainer.innerHTML = '';
@@ -747,16 +775,20 @@ class CalendarAvailabilityFinder {
       .map((g, i) => `
         <span class="group-tag" data-index="${i}" title="${g.emails.join(', ')}">
           ${this.escapeHtml(g.name)} (${g.emails.length}人)
+          <span class="group-edit" data-index="${i}" title="現在のメンバーで上書き">✎</span>
           <span class="group-delete" data-index="${i}">&times;</span>
         </span>`)
       .join('');
 
     this.savedGroupsContainer.querySelectorAll('.group-tag').forEach((tag) => {
       tag.addEventListener('click', (e) => {
-        if (!e.target.classList.contains('group-delete')) {
+        if (!e.target.classList.contains('group-delete') && !e.target.classList.contains('group-edit')) {
           this.loadGroup(parseInt(tag.dataset.index));
         }
       });
+    });
+    this.savedGroupsContainer.querySelectorAll('.group-edit').forEach((btn) => {
+      btn.addEventListener('click', (e) => this.editGroup(parseInt(btn.dataset.index), e));
     });
     this.savedGroupsContainer.querySelectorAll('.group-delete').forEach((btn) => {
       btn.addEventListener('click', (e) => this.deleteGroup(parseInt(btn.dataset.index), e));
@@ -882,7 +914,7 @@ class CalendarAvailabilityFinder {
       if (pageToken) {
         console.log(`[Events API] ${calendarId}: ページ${pageCount}完了 (${allItems.length}件), 次ページあり`);
       }
-    } while (pageToken && pageCount < 10); // 安全のため最大10ページ
+    } while (pageToken && pageCount < 20); // 安全のため最大20ページ (最大50,000件)
 
     return { items: allItems };
   }
@@ -1175,7 +1207,7 @@ class CalendarAvailabilityFinder {
 
             if (!event.start?.dateTime) continue;
 
-            const evTitle = event.summary || '(タイトルなし)';
+            const evTitle = event.summary || '(予定あり)';
             const evStart = new Date(event.start.dateTime);
             const evEnd = new Date(event.end.dateTime);
 
@@ -1923,11 +1955,13 @@ class CalendarAvailabilityFinder {
   renderConflicts(conflictsInRange) {
     if (conflictsInRange.length === 0) {
       this.conflictsSection.classList.add('hidden');
+      this.conflictsBlockActions.classList.add('hidden');
       this._lastConflictsData = null;
       return;
     }
 
     this.conflictsSection.classList.remove('hidden');
+    this.conflictsBlockActions.classList.add('hidden');
 
     // メール毎にグループ化し、各グループ内は時系列ソート
     const byPerson = {};
@@ -1953,6 +1987,7 @@ class CalendarAvailabilityFinder {
       for (const event of events) {
         html += `
           <div class="conflict-card">
+            <input type="checkbox" class="conflict-checkbox" data-title="${this.escapeHtml(event.title)}">
             <div class="conflict-title">${this.escapeHtml(event.title)}</div>
             <div class="conflict-time">${this.formatDate(event.start)} ${this.formatTimeRange(event.start, event.end)}</div>
           </div>`;
@@ -1961,27 +1996,74 @@ class CalendarAvailabilityFinder {
     }
     this.conflictsList.innerHTML = html;
 
-    // 個人ごとのSlackコピーボタン（イベント委任）
+    // 個人ごとのSlackコピーボタン
     this.conflictsList.querySelectorAll('.btn-copy-person').forEach((btn) => {
       btn.addEventListener('click', () => {
         const email = btn.dataset.email;
         this.copyPersonConflictsForSlack(email, btn);
       });
     });
+
+    // チェックボックス変更時に再検索ボタンの表示/非表示を切り替え
+    this.conflictsList.querySelectorAll('.conflict-checkbox').forEach((cb) => {
+      cb.addEventListener('change', () => this.onConflictCheckChanged());
+    });
+  }
+
+  onConflictCheckChanged() {
+    const checked = this.conflictsList.querySelectorAll('.conflict-checkbox:checked');
+    if (checked.length > 0) {
+      this.conflictsBlockActions.classList.remove('hidden');
+      document.getElementById('block-and-research-label').textContent =
+        `チェックした予定(${checked.length}件)をブロックして再検索`;
+    } else {
+      this.conflictsBlockActions.classList.add('hidden');
+    }
+  }
+
+  async blockCheckedAndResearch() {
+    const checked = this.conflictsList.querySelectorAll('.conflict-checkbox:checked');
+    if (checked.length === 0) return;
+
+    // チェックされた予定のタイトルを収集（重複排除）
+    const newBlockTitles = new Set();
+    checked.forEach((cb) => {
+      const title = cb.dataset.title;
+      if (title && title !== '(予定あり)') {
+        newBlockTitles.add(title);
+      }
+    });
+
+    if (newBlockTitles.size === 0) return;
+
+    // 既存のブロックキーワードに追加
+    const existing = this.settings.blockKeywords || [];
+    const merged = [...new Set([...existing, ...newBlockTitles])];
+    this.settings.blockKeywords = merged;
+
+    // UIのブロックキーワード入力欄にも反映
+    this.blockKeywords.value = merged.join(', ');
+
+    // 再検索実行
+    await this.searchAvailability();
   }
 
   // 特定の人のSlack用コピー
-  copyPersonConflictsForSlack(email, btn) {
-    if (!this._lastConflictsData || !this._lastConflictsData[email]) return;
-    const events = this._lastConflictsData[email];
+  formatConflictsForSlack(email, events) {
     const name = this.getDisplayName(email);
-
     let text = `@${name}\n`;
     for (const event of events) {
       const dateTime = `${this.formatDate(event.start)} ${this.formatTimeRange(event.start, event.end)}`;
       text += `\`\`\`\n${event.title}\n${dateTime}\n\`\`\`\n`;
     }
+    return text;
+  }
 
+  copyPersonConflictsForSlack(email, btn) {
+    if (!this._lastConflictsData || !this._lastConflictsData[email]) return;
+    const events = this._lastConflictsData[email];
+
+    const text = this.formatConflictsForSlack(email, events);
     navigator.clipboard.writeText(text.trim());
     const orig = btn.textContent;
     btn.textContent = 'コピー済み!';
@@ -1994,12 +2076,7 @@ class CalendarAvailabilityFinder {
 
     let text = '';
     for (const [email, events] of Object.entries(this._lastConflictsData)) {
-      const name = this.getDisplayName(email);
-      text += `@${name}\n`;
-      for (const event of events) {
-        const dateTime = `${this.formatDate(event.start)} ${this.formatTimeRange(event.start, event.end)}`;
-        text += `\`\`\`\n${event.title}\n${dateTime}\n\`\`\`\n`;
-      }
+      text += this.formatConflictsForSlack(email, events);
       text += '\n';
     }
 
@@ -2194,6 +2271,9 @@ class CalendarAvailabilityFinder {
     let statusHtml = '';
     if (successCount > 0) {
       statusHtml += `<div class="register-success">✅ ${successCount}件の予定を登録しました！</div>`;
+      const successLabels = results.filter((r) => r.success).map((r) => r.label);
+      this._registeredCopyText = `${title}\n${successLabels.join('\n')}`;
+      statusHtml += `<button id="copy-registered-btn" class="btn btn-copy-registered">📋 登録した日程をコピー</button>`;
     }
     if (failCount > 0) {
       statusHtml += `<div class="register-error">❌ ${failCount}件の登録に失敗しました:</div>`;
@@ -2204,6 +2284,16 @@ class CalendarAvailabilityFinder {
 
     this.registerStatus.innerHTML = statusHtml;
     this.registerStatus.classList.remove('hidden');
+
+    const copyBtn = document.getElementById('copy-registered-btn');
+    if (copyBtn) {
+      copyBtn.addEventListener('click', () => {
+        navigator.clipboard.writeText(this._registeredCopyText).then(() => {
+          copyBtn.textContent = 'コピーしました！';
+          setTimeout(() => { copyBtn.textContent = '📋 登録した日程をコピー'; }, 2000);
+        });
+      });
+    }
 
     document.querySelectorAll('.slot-checkbox:checked').forEach((cb) => {
       cb.checked = false;

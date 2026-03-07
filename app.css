@@ -106,9 +106,9 @@ body {
   align-items: center;
   background: #f1f3f4;
   color: #5f6368;
-  padding: 6px 14px;
+  padding: 8px 16px;
   border-radius: 20px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
 }
 .btn-settings:hover {
@@ -579,6 +579,21 @@ header h2 {
   white-space: nowrap;
   flex-shrink: 0;
 }
+.conflict-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: #d93025;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.conflict-card:has(.conflict-checkbox:checked) {
+  background: #fce8e6;
+  border-color: #d93025;
+}
+.conflicts-block-actions {
+  margin-top: 10px;
+  text-align: right;
+}
 
 /* Footer */
 .footer {
@@ -706,6 +721,24 @@ header h2 {
   margin-bottom: 8px;
 }
 
+.btn-copy-registered {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 16px;
+  background: #e8f0fe;
+  color: #1a73e8;
+  border: 1px solid #c2d7f5;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.btn-copy-registered:hover {
+  background: #d2e3fc;
+}
+
 .register-error {
   background: #fce8e6;
   border: 1px solid #f5c6c0;
@@ -801,6 +834,13 @@ header h2 {
   border-color: #4285F4;
   color: #1a73e8;
 }
+.group-tag .group-edit {
+  font-size: 13px;
+  color: #80868b;
+  margin-left: 2px;
+  line-height: 1;
+}
+.group-tag .group-edit:hover { color: #4285F4; }
 .group-tag .group-delete {
   font-size: 14px;
   color: #80868b;
@@ -813,6 +853,13 @@ header h2 {
   margin-top: 8px;
   display: flex;
   gap: 6px;
+}
+.btn-clear-emails {
+  color: #d93025;
+}
+.btn-clear-emails:hover {
+  background: #fce8e6;
+  color: #a50e0e;
 }
 .btn-small {
   padding: 4px 10px;
