@@ -1032,6 +1032,7 @@ class CalendarAvailabilityFinder {
       }));
 
       const conflictsInRange = filteredEvents.filter((ev) =>
+        ev.source === 'events-api' &&                      // Events API由来のみ（FreeBusyは連結されていて不正確）
         ev.start < timeMax && ev.end > timeMin &&          // 検索日付範囲内
         this.settings.activeDays.includes(ev.start.getDay()) && // 対象曜日
         this.isWithinSearchTimeRange(ev.start, ev.end) &&  // 検索時間帯内
