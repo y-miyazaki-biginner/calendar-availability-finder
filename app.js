@@ -2054,7 +2054,7 @@ class CalendarAvailabilityFinder {
     let text = `@${name}\n`;
     for (const event of events) {
       const dateTime = `${this.formatDate(event.start)} ${this.formatTimeRange(event.start, event.end)}`;
-      text += `\`\`\`\n${event.title}\n${dateTime}\n\`\`\`\n`;
+      text += `${event.title}\n${dateTime}\n\n`;
     }
     return text;
   }
